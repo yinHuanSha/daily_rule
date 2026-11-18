@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { addToTree, emptyState, hasQuota, localDay, parseBackup, pruneBranch, subtreeIds } from '../src/model.ts'
+import { addToTree, addTreeCategory, emptyState, hasQuota, localDay, moveTreeBranchCategory, parseBackup, pruneBranch, removeTreeCategory, renameTreeCategory, subtreeIds } from '../src/model.ts'
 import type { RuleInput, TreeState } from '../src/model.ts'
 
 function input(title: string, parentId: string | null = null): RuleInput {
@@ -68,7 +68,7 @@ test('stale previews, stale parent and retry sources cannot create unintended ch
 test('version, structure, local dates, daily quota and graph consistency are checked on import', () => {
   assert.deepEqual(parseBackup(JSON.stringify(emptyState())), emptyState())
   assert.throws(() => parseBackup('{'), /JSON/)
-  assert.throws(() => parseBackup('{"version":2,"rules":[]}'), /版本/)
+  assert.throws(() => parseBackup('{"version":3,"rules":[]}'), /版本/)
   assert.throws(() => parseBackup('{"version":1,"rules":[{"id":"x"}]}'), /字段/)
   const original = tree()
   const invalid = (change: (state: TreeState) => void) => {
@@ -87,4 +87,70 @@ test('version, structure, local dates, daily quota and graph consistency are che
   const child = archived.rules.find(rule => rule.id === 'F')!
   child.incidentId = 'missing'
   assert.throws(() => parseBackup(JSON.stringify(archived)), /剪枝记录/)
+})
+
+test('children inherit a category, explicit mismatches and missing categories are rejected', () => {
+  const start = emptyState()
+  const root = addToTree(start, { ...input('根'), categoryId: 'study' }, new Date(2026, 0, 1), 'a')
+  const tomorrow = new Date(2026, 0, 2)
+  const child = input('子国策', 'a')
+  assert.equal(addToTree(root, child, tomorrow, 'b').rules[1].categoryId, 'study')
+  assert.equal(addToTree(root, { ...child, categoryId: 'study' }, tomorrow, 'b').rules[1].categoryId, 'study')
+  assert.throws(() => addToTree(root, { ...child, categoryId: null }, tomorrow, 'b'), /须沿用/)
+  assert.throws(() => addToTree(root, { ...child, categoryId: 'life' }, tomorrow, 'b'), /须沿用/)
+  assert.throws(() => addToTree(root, { ...input('根'), categoryId: 'missing' }, tomorrow, 'z'), /类别/)
+  assert.equal(addToTree(root, input('根'), tomorrow, 'z').rules[1].categoryId, null)
+  assert.throws(() => addToTree(root, { ...input('另一分类'), categoryId: 'work' }, new Date(2026, 0, 1), 'x'), /今天已新增/)
+})
+
+test('moving a root includes archived descendants and preserves a separate retry branch', () => {
+  const first = pruneBranch(tree(), 'C', new Date(2026, 5, 8))
+  const next = addToTree(first, { ...input('C'), categoryId: 'life', retryOf: 'C' }, new Date(2026, 5, 9), 'retry')
+  const moved = moveTreeBranchCategory(next, 'B', 'work')
+  assert.ok(moved.rules.filter(rule => rule.id !== 'retry').every(rule => rule.categoryId === 'work'))
+  assert.equal(moved.rules.find(rule => rule.id === 'retry')?.categoryId, 'life')
+  assert.throws(() => moveTreeBranchCategory(next, 'D', 'work'), /顶层/)
+  assert.throws(() => moveTreeBranchCategory(next, 'C', 'life'), /顶层/)
+  assert.throws(() => moveTreeBranchCategory(moved, 'B', 'unknown'), /类别/)
+  const removed = removeTreeCategory(moved, 'work')
+  assert.ok(removed.rules.filter(rule => rule.id !== 'retry').every(rule => rule.categoryId === null))
+  assert.deepEqual(removed.rules.map(({categoryId, ...rule}) => rule), next.rules.map(({categoryId, ...rule}) => rule))
+  assert.equal(removed.categories.some(category => category.id === 'work'), false)
+  assert.deepEqual(parseBackup(JSON.stringify(removed)), removed)
+})
+
+test('names are trimmed, unique, and reserve the display name for uncategorized rules', () => {
+  const added = addTreeCategory(emptyState(), 'x', '  Project  ')
+  assert.equal(added.categories.at(-1)?.name, 'Project')
+  assert.throws(() => addTreeCategory(added, 'y', 'ＰＲＯＪＥＣＴ'), /同名/)
+  assert.throws(() => renameTreeCategory(added, 'x', '生活国策 '), /同名/)
+  assert.throws(() => renameTreeCategory(added, 'x', '　'), /名称/)
+  assert.throws(() => renameTreeCategory(added, 'x', '未分类'), /保留/)
+  assert.throws(() => renameTreeCategory(added, 'missing', '新名'), /不存在/)
+  assert.equal(renameTreeCategory(added, 'x', '新名').categories.at(-1)?.id, 'x')
+})
+
+test('v1 migrates every rule without guessing its category; v2 round-trips with empty categories', () => {
+  const first = pruneBranch(tree(), 'C', new Date(2026, 5, 8))
+  const next = addToTree(first, { ...input('C', 'E'), retryOf: 'C' }, new Date(2026, 5, 9), 'retry')
+  const legacy = { version: 1, rules: next.rules.map(({categoryId, ...rule}) => rule) }
+  const migrated = parseBackup(JSON.stringify(legacy))
+  assert.deepEqual(migrated, next)
+  const noCategories = { ...migrated, categories: [] }
+  assert.deepEqual(parseBackup(JSON.stringify(noCategories)), noCategories)
+})
+
+test('v2 rejects malformed category definitions and category assignments, including history', () => {
+  const records = pruneBranch(tree(), 'C', new Date(2026, 5, 8))
+  const serialize = (categories: unknown, rules: unknown = records.rules) => JSON.stringify({ version: 2, categories, rules })
+  for (const categories of [
+    undefined, {}, [{id: '', name: '数据'}], [{id:'x', name:' '}], [{id:'y', name:'未分类'}],
+    [{id:'x', name:'A'}, {id:'x', name:'B'}], [{id:'x', name:'B'}, {id:'y', name:' b '}],
+  ]) assert.throws(() => parseBackup(serialize(categories)), /类别|名称/)
+  for (const categoryId of ['missing', undefined]) {
+    const rules = records.rules.map(rule => ({...rule, categoryId}))
+    assert.throws(() => parseBackup(serialize(records.categories, rules)), /类别/)
+  }
+  const detached = records.rules.map(rule => rule.id === 'F' ? {...rule, categoryId:'work'} : rule)
+  assert.throws(() => parseBackup(serialize(records.categories, detached)), /类别不一致/)
 })

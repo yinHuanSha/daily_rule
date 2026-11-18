@@ -1,8 +1,17 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
-import { ArrowRight, ChevronRight, Flag, GitBranch, Scissors, ShieldAlert, X } from 'lucide-react'
+import {
+  ArrowRight,
+  ChevronRight,
+  Flag,
+  FolderInput,
+  GitBranch,
+  Scissors,
+  ShieldAlert,
+  X,
+} from 'lucide-react'
 import { Emblem } from './Emblem'
-import type { Badge, Rule, RuleInput } from './model'
+import type { Badge, Category, Rule, RuleInput } from './model'
 
 export function Dialog({
   title,
@@ -61,12 +70,16 @@ const badgeNames: Record<Badge, string> = {
 
 export function RuleForm({
   active,
+  categories,
+  categoryId,
   parentId,
   retry,
   onClose,
   onSave,
 }: {
   active: Rule[]
+  categories: Category[]
+  categoryId: string | null
   parentId: string | null
   retry?: Rule
   onClose: () => void
@@ -74,12 +87,17 @@ export function RuleForm({
 }) {
   const [badge, setBadge] = useState<Badge>(retry?.badge ?? 'standard')
   const [selectedParent, setSelectedParent] = useState<string | null>(parentId)
-  const parentMissing = selectedParent !== null && !active.some((rule) => rule.id === selectedParent)
+  const [selectedCategory, setSelectedCategory] = useState(categoryId)
+  const parent = active.find((rule) => rule.id === selectedParent)
+  const parentMissing = selectedParent !== null && !parent
+  const effectiveCategory = parent ? parent.categoryId : selectedCategory
+  const categoryMissing =
+    effectiveCategory !== null && !categories.some((category) => category.id === effectiveCategory)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState('')
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (pending || parentMissing) return
+    if (pending || parentMissing || categoryMissing) return
     const data = new FormData(event.currentTarget)
     setPending(true)
     setError('')
@@ -89,6 +107,7 @@ export function RuleForm({
         trigger: String(data.get('trigger')),
         action: String(data.get('action')),
         parentId: selectedParent,
+        categoryId: effectiveCategory,
         retryOf: retry?.id ?? null,
         badge,
       })
@@ -139,26 +158,58 @@ export function RuleForm({
             />
           </label>
         </div>
-        <label>
-          上级国策
-          <select
-            name="parent"
-            value={selectedParent ?? ''}
-            onChange={(e) => setSelectedParent(e.target.value || null)}
-          >
-            <option value="">独立分支</option>
-            {parentMissing && (
-              <option value={selectedParent!} disabled>
-                原上级已退出当前树
-              </option>
-            )}
-            {active.map((rule) => (
-              <option key={rule.id} value={rule.id}>
-                {rule.title}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="form-pair">
+          <label>
+            上级国策
+            <select
+              name="parent"
+              value={selectedParent ?? ''}
+              onChange={(e) => {
+                if (parent) setSelectedCategory(parent.categoryId)
+                setSelectedParent(e.target.value || null)
+              }}
+            >
+              <option value="">独立分支</option>
+              {parentMissing && (
+                <option value={selectedParent!} disabled>
+                  原上级已退出当前树
+                </option>
+              )}
+              {active.map((rule) => (
+                <option key={rule.id} value={rule.id}>
+                  {rule.title}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            国策类别
+            <select
+              name="category"
+              value={effectiveCategory ?? ''}
+              disabled={!!parent}
+              onChange={(e) => setSelectedCategory(e.target.value || null)}
+            >
+              <option value="">未分类</option>
+              {categoryMissing && (
+                <option value={effectiveCategory!} disabled>
+                  原类别已被删除
+                </option>
+              )}
+              {categories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        {parent && <small className="field-hint">子国策沿用上级国策的类别。</small>}
+        {categoryMissing && (
+          <p className="error" role="alert">
+            原类别已被删除，请重新选择。
+          </p>
+        )}
         {parentMissing && (
           <p className="error" role="alert">
             原上级国策已退出当前树，请重新选择上级，或选择独立分支。
@@ -188,7 +239,7 @@ export function RuleForm({
         )}
         <footer className="dialog-footer">
           <small>建立后将使用今日名额</small>
-          <button className="button primary" disabled={pending || parentMissing}>
+          <button className="button primary" disabled={pending || parentMissing || categoryMissing}>
             <Flag size={15} />
             建立国策
           </button>
@@ -202,19 +253,23 @@ export function Detail({
   rule,
   parent,
   childrenCount,
+  categoryName,
   available,
   demo,
   onClose,
   onAdd,
+  onMove,
   onBreach,
 }: {
   rule: Rule
   parent?: Rule
   childrenCount: number
+  categoryName: string
   available: boolean
   demo: boolean
   onClose: () => void
   onAdd: () => void
+  onMove: () => void
   onBreach: () => void
 }) {
   return (
@@ -241,6 +296,10 @@ export function Detail({
           <dd>{rule.action}</dd>
         </dl>
         <div className="detail-meta">
+          <span>国策类别</span>
+          <b>{categoryName}</b>
+        </div>
+        <div className="detail-meta">
           <span>直属子国策</span>
           <b>{childrenCount} 项</b>
         </div>
@@ -257,6 +316,12 @@ export function Detail({
               添加子国策
             </button>
             {!available && <small>今日新增名额已用完</small>}
+            {rule.parentId === null && (
+              <button className="button secondary" onClick={onMove}>
+                <FolderInput size={16} />
+                调整分支类别
+              </button>
+            )}
             <button className="button danger-light" onClick={onBreach}>
               <Scissors size={16} />
               记录失守

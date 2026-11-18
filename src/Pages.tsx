@@ -15,21 +15,24 @@ import {
 import { Emblem } from './Emblem'
 import { Dialog } from './RuleDialogs'
 import { localDay, parseBackup } from './model'
-import type { Rule, TreeState } from './model'
+import type { Category, Rule, TreeState } from './model'
 import { BackupConflict, loadTree, replaceTree } from './storage'
 
 export function History({
   rules,
+  categories,
   available,
   onRetry,
 }: {
   rules: Rule[]
+  categories: Category[]
   available: boolean
   onRetry: (rule: Rule) => void
 }) {
   const archived = rules
     .filter((rule) => rule.archivedAt)
     .sort((a, b) => b.archivedAt!.localeCompare(a.archivedAt!))
+  const names = new Map(categories.map((category) => [category.id, category.name]))
   return (
     <section className="section-card">
       <header className="section-header">
@@ -59,6 +62,7 @@ export function History({
                   <span className={rule.cause === 'breach' ? 'breach-type' : ''}>
                     {rule.cause === 'breach' ? '主动报告失守' : '随父节点撤回'}
                   </span>
+                  <span>{names.get(rule.categoryId ?? '') ?? '未分类'}</span>
                   <time>{new Date(rule.archivedAt!).toLocaleDateString('zh-CN')}</time>
                 </div>
               </div>
@@ -116,7 +120,7 @@ export function Backups({
         <div>
           <h3>此设备的国策档案</h3>
           <p>
-            {state.rules.filter((r) => !r.archivedAt).length} 项生效 ·{' '}
+            {state.categories.length} 个类别 · {state.rules.filter((r) => !r.archivedAt).length} 项生效 ·{' '}
             {state.rules.filter((r) => r.archivedAt).length} 项归档
           </p>
         </div>
@@ -127,7 +131,7 @@ export function Backups({
             <ArrowDownToLine />
           </div>
           <h2>导出备份</h2>
-          <p>把整棵树、撤回历史和每日名额记录保存为 JSON 文件。</p>
+          <p>把国策类别、整棵树、撤回历史和每日名额记录保存为 JSON 文件。</p>
           <button className="button primary" onClick={exportFile}>
             <ArrowDownToLine size={16} />
             导出备份
@@ -183,11 +187,13 @@ export function Backups({
         >
           <div className="dialog-section">
             <p>
-              本机现有 <b>{preview.current.rules.filter((r) => !r.archivedAt).length}</b> 项生效国策和{' '}
+              本机现有 <b>{preview.current.categories.length}</b> 个类别、
+              <b>{preview.current.rules.filter((r) => !r.archivedAt).length}</b> 项生效国策和{' '}
               <b>{preview.current.rules.filter((r) => r.archivedAt).length}</b> 项归档记录。
             </p>
             <p>
-              备份包含 <b>{preview.incoming.rules.filter((r) => !r.archivedAt).length}</b> 项生效国策和{' '}
+              导入后将有 <b>{preview.incoming.categories.length}</b> 个类别、
+              <b>{preview.incoming.rules.filter((r) => !r.archivedAt).length}</b> 项生效国策和{' '}
               <b>{preview.incoming.rules.filter((r) => r.archivedAt).length}</b>{' '}
               项归档记录。确认后将替换此设备的全部国策数据与名额记录。
             </p>
@@ -245,7 +251,7 @@ const chapters = [
   {
     icon: Flag,
     title: '每天最多建立一项',
-    text: '可以从空白处开辟独立分支，也可以把新国策挂在相关节点下。按设备本地自然日计算名额，当天只看树也可以。',
+    text: '可以在一个类别下建立新分支，也可以向已有国策添加子国策。全树共用一个每日名额，按设备本地自然日计算。',
   },
   {
     icon: Scissors,
@@ -282,6 +288,8 @@ export function Guide() {
         ))}
       </div>
       <footer className="guide-source">
+        应用中的空根用于连接各类国策。「类别管理」可自定义类别，子国策沿用上级的类别。整理类别不占每日新增名额。
+        <br />
         规则依据 · edmond《如何提高自制力？》第 23–27 页，递归稳态迭代协议（RSIP）。
       </footer>
     </section>

@@ -1,5 +1,5 @@
-import { addToTree, emptyState, parseBackup, pruneBranch } from './model.ts'
-import type { Rule, RuleInput, TreeState } from './model.ts'
+import { addToTree, addTreeCategory, decodeTree, emptyState, moveTreeBranchCategory, pruneBranch, removeTreeCategory, renameTreeCategory } from './model.ts'
+import type { Category, Rule, RuleInput, TreeState } from './model.ts'
 
 const dbName = 'daily-rule'
 const storeName = 'tree'
@@ -11,10 +11,32 @@ function openDatabase(): Promise<IDBDatabase> {
       reject(new Error('此浏览器无法使用本地数据库，请换用支持 IndexedDB 的浏览器。'))
       return
     }
-    const request = indexedDB.open(dbName, 1)
-    request.onupgradeneeded = () => request.result.createObjectStore(storeName)
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error)
+    // A v1 client explicitly opens version 1, so it cannot overwrite the upgraded snapshot.
+    const request = indexedDB.open(dbName, 2)
+    let migrationError: unknown
+    request.onupgradeneeded = event => {
+      if (event.oldVersion === 0) {
+        request.result.createObjectStore(storeName)
+        return
+      }
+      const upgrade = request.transaction!
+      const store = upgrade.objectStore(storeName)
+      const read = store.get(treeKey)
+      read.onsuccess = () => {
+        try {
+          if (read.result !== undefined) store.put(decodeTree(read.result), treeKey)
+        } catch (error) {
+          migrationError = error
+          upgrade.abort()
+        }
+      }
+    }
+    request.onsuccess = () => {
+      const db = request.result
+      db.onversionchange = () => db.close()
+      resolve(db)
+    }
+    request.onerror = () => reject(migrationError ?? request.error)
   })
 }
 
@@ -104,18 +126,39 @@ export function loadTree(): Promise<TreeState> {
   return transact('readonly', state => ({ result: state }))
 }
 
-export async function addRule(input: RuleInput): Promise<Rule> {
-  const rule = await transact('readwrite', state => {
-    const next = addToTree(state, input, new Date(), newId())
-    return { next, result: next.rules[next.rules.length - 1] }
+async function updateTree(operation: (state: TreeState) => TreeState): Promise<TreeState> {
+  const updated = await transact('readwrite', state => {
+    const next = operation(state)
+    return { next, result: next }
   })
   changed()
-  return rule
+  return updated
+}
+
+export async function addRule(input: RuleInput): Promise<Rule> {
+  const next = await updateTree(state => addToTree(state, input, new Date(), newId()))
+  return next.rules[next.rules.length - 1]
 }
 
 export async function pruneRule(id: string, expectedIds?: readonly string[]): Promise<void> {
-  await transact('readwrite', state => ({ next: pruneBranch(state, id, new Date(), expectedIds), result: undefined }))
-  changed()
+  await updateTree(state => pruneBranch(state, id, new Date(), expectedIds))
+}
+
+export async function createCategory(name: string): Promise<Category> {
+  const next = await updateTree(state => addTreeCategory(state, newId(), name))
+  return next.categories[next.categories.length - 1]
+}
+
+export async function renameCategory(id: string, name: string): Promise<void> {
+  await updateTree(state => renameTreeCategory(state, id, name))
+}
+
+export async function removeCategory(id: string): Promise<void> {
+  await updateTree(state => removeTreeCategory(state, id))
+}
+
+export async function moveBranchCategory(rootRuleId: string, categoryId: string | null): Promise<void> {
+  await updateTree(state => moveTreeBranchCategory(state, rootRuleId, categoryId))
 }
 
 export class BackupConflict extends Error {
@@ -128,10 +171,9 @@ export class BackupConflict extends Error {
 }
 
 export async function replaceTree(state: TreeState, expected?: TreeState): Promise<void> {
-  const next = parseBackup(JSON.stringify(state))
-  await transact('readwrite', current => {
+  const next = decodeTree(state)
+  await updateTree(current => {
     if (expected && JSON.stringify(current) !== JSON.stringify(expected)) throw new BackupConflict(current)
-    return { next, result: undefined }
+    return next
   })
-  changed()
 }

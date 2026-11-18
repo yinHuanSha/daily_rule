@@ -9,7 +9,7 @@ import {
   Compass,
   DatabaseBackup,
   Flag,
-  GitBranch,
+  Folders,
   HardDrive,
   Layers3,
   Map as MapIcon,
@@ -20,8 +20,9 @@ import {
   X,
 } from 'lucide-react'
 import { Backups, Guide, History } from './Pages'
-import { Detail, PruneDialog, RuleForm } from './RuleDialogs'
-import { demoRules } from './demo'
+import { CategoryDetail, CategoryManager, MoveCategoryDialog } from './CategoryDialogs'
+import { Detail, Dialog, PruneDialog, RuleForm } from './RuleDialogs'
+import { demoCategories, demoRules } from './demo'
 import { emptyState, hasQuota, localDay, subtreeIds } from './model'
 import type { Rule } from './model'
 import { addRule, loadTree, pruneRule, subscribeTree } from './storage'
@@ -36,8 +37,10 @@ const nav = [
 ] as const
 type Page = (typeof nav)[number]['id']
 type Overlay =
-  | { kind: 'add'; parentId: string | null; retry?: Rule }
+  | { kind: 'add'; parentId: string | null; categoryId: string | null; retry?: Rule }
   | { kind: 'detail'; id: string }
+  | { kind: 'category' | 'move'; id: string }
+  | { kind: 'categories' | 'demoCategories' }
   | { kind: 'prune'; rules: Rule[] }
   | null
 const descriptions: Record<Exclude<Page, 'tree'>, string> = {
@@ -78,6 +81,8 @@ export default function App() {
   const [ready, setReady] = useState(false)
   const [loadError, setLoadError] = useState('')
   const [demo, setDemo] = useState(false)
+  // undefined shows the whole map. null matches the existing uncategorized branches.
+  const [categoryFilter, setCategoryFilter] = useState<string | null | undefined>(undefined)
   const [overlay, setOverlay] = useState<Overlay>(null)
   const [menu, setMenu] = useState(false)
   const [message, setMessage] = useState('')
@@ -144,14 +149,27 @@ export default function App() {
   const active = tree.rules.filter((rule) => !rule.archivedAt)
   const available = ready && hasQuota(tree, today)
   const shown = demo ? demoRules : active
+  const shownCategories = demo ? demoCategories : tree.categories
+  const hasUncategorized = shown.some((rule) => rule.categoryId === null)
+  const filter =
+    (categoryFilter === null && hasUncategorized) ||
+    shownCategories.some((category) => category.id === categoryFilter)
+      ? categoryFilter
+      : undefined
+  const visibleRules = filter === undefined ? shown : shown.filter((rule) => rule.categoryId === filter)
+  const visibleCategories =
+    filter === undefined ? shownCategories : shownCategories.filter((category) => category.id === filter)
   const selected = overlay?.kind === 'detail' ? shown.find((rule) => rule.id === overlay.id) : undefined
+  const selectedCategory =
+    overlay?.kind === 'category' ? shownCategories.find((item) => item.id === overlay.id) : undefined
+  const moving = overlay?.kind === 'move' ? active.find((rule) => rule.id === overlay.id) : undefined
   const current = nav.find((item) => item.id === page)!
-  function beginAdd(parentId: string | null, retry?: Rule) {
+  function beginAdd(parentId: string | null, categoryId: string | null = null, retry?: Rule) {
     if (!ready || !available) {
       notify(ready ? '今日新增名额已用完，明天可以再加。' : '请先读取本地档案。')
       return
     }
-    setOverlay({ kind: 'add', parentId, retry })
+    setOverlay({ kind: 'add', parentId, categoryId, retry })
   }
   return (
     <div className="app-shell">
@@ -257,20 +275,34 @@ export default function App() {
                   </div>
                   <h1>国策指挥台</h1>
                   <p>每天最多建立一项国策，从一个具体行动开始。</p>
-                  <button className="button gold" onClick={() => beginAdd(null)} disabled={!available}>
-                    <Plus size={17} />
-                    {ready && !available ? '今日名额已用完' : '新建分支'}
-                  </button>
+                  <div className="hero-actions">
+                    <button
+                      className="button gold"
+                      onClick={() => beginAdd(null, demo ? null : (filter ?? null))}
+                      disabled={!available}
+                    >
+                      <Plus size={17} />
+                      {ready && !available ? '今日名额已用完' : '新建分支'}
+                    </button>
+                    <button
+                      className="button hero-secondary"
+                      disabled={!ready}
+                      onClick={() => setOverlay({ kind: 'categories' })}
+                    >
+                      <Folders size={16} />
+                      类别管理
+                    </button>
+                  </div>
                 </div>
               </section>
               <section className="stats" aria-label="国策概况">
                 {[
                   { icon: Flag, label: '生效国策', value: active.length, unit: '项', tone: 'green' },
                   {
-                    icon: GitBranch,
-                    label: '独立分支',
-                    value: active.filter((r) => r.parentId === null).length,
-                    unit: '条',
+                    icon: Folders,
+                    label: '国策类别',
+                    value: tree.categories.length,
+                    unit: '类',
                     tone: 'ochre',
                   },
                   {
@@ -305,6 +337,7 @@ export default function App() {
                       aria-pressed={!demo}
                       onClick={() => {
                         setDemo(false)
+                        setCategoryFilter(undefined)
                         setOverlay(null)
                       }}
                     >
@@ -315,6 +348,7 @@ export default function App() {
                       aria-pressed={demo}
                       onClick={() => {
                         setDemo(true)
+                        setCategoryFilter(undefined)
                         setOverlay(null)
                       }}
                     >
@@ -332,18 +366,43 @@ export default function App() {
                     }
                   >
                     <TreeMap
-                      rules={shown}
-                      canCreate={available}
-                      hadHistory={tree.rules.length > 0}
+                      rules={visibleRules}
+                      categories={visibleCategories}
                       selectedId={selected?.id ?? null}
                       highlightedIds={overlay?.kind === 'prune' ? overlay.rules.map((r) => r.id) : []}
                       onSelect={(id) => setOverlay({ kind: 'detail', id })}
-                      onCreate={() => beginAdd(null)}
+                      onCategorySelect={(id) => setOverlay({ kind: 'category', id })}
+                      onManageCategories={() => setOverlay({ kind: demo ? 'demoCategories' : 'categories' })}
                       demo={demo}
                     />
                   </Suspense>
                 </div>
                 <footer className="map-footer">
+                  <label className="map-category-filter">
+                    <Folders size={14} />
+                    <select
+                      aria-label="筛选沙盘类别"
+                      value={filter === undefined ? 'all' : filter === null ? 'none' : 'category/' + filter}
+                      onChange={(event) => {
+                        const value = event.target.value
+                        setCategoryFilter(
+                          value === 'all'
+                            ? undefined
+                            : value === 'none'
+                              ? null
+                              : value.slice('category/'.length),
+                        )
+                      }}
+                    >
+                      <option value="all">全部类别</option>
+                      {hasUncategorized && <option value="none">未分类</option>}
+                      {shownCategories.map((category) => (
+                        <option key={category.id} value={'category/' + category.id}>
+                          {category.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   <span>
                     <span className="legend-dot" />
                     生效国策
@@ -366,7 +425,12 @@ export default function App() {
                 <p>{descriptions[page]}</p>
               </header>
               {page === 'history' && (
-                <History rules={tree.rules} available={available} onRetry={(r) => beginAdd(null, r)} />
+                <History
+                  rules={tree.rules}
+                  categories={tree.categories}
+                  available={available}
+                  onRetry={(r) => beginAdd(null, r.categoryId, r)}
+                />
               )}
               {page === 'backup' && <Backups state={tree} notify={notify} afterImport={refresh} />}
               {page === 'guide' && <Guide />}
@@ -377,13 +441,16 @@ export default function App() {
       {overlay?.kind === 'add' && (
         <RuleForm
           active={active}
+          categories={tree.categories}
+          categoryId={overlay.categoryId}
           parentId={overlay.parentId}
           retry={overlay.retry}
           onClose={() => setOverlay(null)}
           onSave={async (input) => {
-            await addRule(input)
+            const created = await addRule(input)
             await refresh()
             setDemo(false)
+            if (demo || (filter !== undefined && filter !== created.categoryId)) setCategoryFilter(undefined)
             navigate('tree')
             notify('国策已建立')
           }}
@@ -394,13 +461,64 @@ export default function App() {
           rule={selected}
           parent={shown.find((r) => r.id === selected.parentId)}
           childrenCount={shown.filter((r) => r.parentId === selected.id).length}
+          categoryName={
+            shownCategories.find((category) => category.id === selected.categoryId)?.name ?? '未分类'
+          }
           available={available}
           demo={demo}
           onClose={() => setOverlay(null)}
-          onAdd={() => beginAdd(selected.id)}
+          onAdd={() => beginAdd(selected.id, selected.categoryId)}
+          onMove={() => setOverlay({ kind: 'move', id: selected.id })}
           onBreach={() => {
             const byId = new Map(active.map((r) => [r.id, r]))
             setOverlay({ kind: 'prune', rules: subtreeIds(tree, selected.id).map((id) => byId.get(id)!) })
+          }}
+        />
+      )}
+      {overlay?.kind === 'categories' && (
+        <CategoryManager tree={tree} onChange={refresh} onClose={() => setOverlay(null)} />
+      )}
+      {overlay?.kind === 'demoCategories' && (
+        <Dialog title="示例图的国策类别" onClose={() => setOverlay(null)}>
+          <div className="dialog-section">
+            <p>空根连接以下类别。点选类别可查看其中的示例国策。</p>
+            <ul className="category-branches">
+              {demoCategories.map((category) => (
+                <li key={category.id}>
+                  <button
+                    className="button secondary wide"
+                    onClick={() => setOverlay({ kind: 'category', id: category.id })}
+                  >
+                    {category.name}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </Dialog>
+      )}
+      {selectedCategory && (
+        <CategoryDetail
+          category={selectedCategory}
+          rules={shown}
+          available={available}
+          demo={demo}
+          onClose={() => setOverlay(null)}
+          onAdd={() => beginAdd(null, selectedCategory.id)}
+          onSelect={(id) => setOverlay({ kind: 'detail', id })}
+          onManage={() => setOverlay({ kind: 'categories' })}
+        />
+      )}
+      {moving && (
+        <MoveCategoryDialog
+          rule={moving}
+          categories={tree.categories}
+          onClose={() => setOverlay(null)}
+          onSaved={async () => {
+            await refresh()
+            setCategoryFilter(undefined)
+            setOverlay({ kind: 'detail', id: moving.id })
+            notify('分支类别已更新')
           }}
         />
       )}
