@@ -118,8 +118,20 @@ export async function pruneRule(id: string, expectedIds?: readonly string[]): Pr
   changed()
 }
 
-export async function replaceTree(state: TreeState): Promise<void> {
+export class BackupConflict extends Error {
+  current: TreeState
+
+  constructor(current: TreeState) {
+    super('预览期间本机档案已更新。请重新核对当前档案，再决定是否替换。')
+    this.current = current
+  }
+}
+
+export async function replaceTree(state: TreeState, expected?: TreeState): Promise<void> {
   const next = parseBackup(JSON.stringify(state))
-  await transact('readwrite', () => ({ next, result: undefined }))
+  await transact('readwrite', current => {
+    if (expected && JSON.stringify(current) !== JSON.stringify(expected)) throw new BackupConflict(current)
+    return { next, result: undefined }
+  })
   changed()
 }

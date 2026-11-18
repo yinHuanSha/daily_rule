@@ -1,0 +1,209 @@
+.atlas-map {
+  position: relative;
+  isolation: isolate;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  color: #263b31;
+  background-color: #e8e4cd;
+  background-image:
+    radial-gradient(ellipse at 43% 35%, #f7f2de 0%, transparent 64%),
+    radial-gradient(ellipse at 88% 18%, #dcdcc0 0%, transparent 36%),
+    radial-gradient(ellipse at 8% 95%, #d8d7b6 0%, transparent 43%);
+}
+
+.atlas-paper,
+.atlas-relief,
+.atlas-graticule {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.atlas-paper { z-index: -1; overflow: hidden; }
+.atlas-graticule {
+  background-image:
+    linear-gradient(to right, rgb(90 98 65 / 11%) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(90 98 65 / 11%) 1px, transparent 1px),
+    linear-gradient(to right, rgb(98 101 66 / 5%) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(98 101 66 / 5%) 1px, transparent 1px);
+  background-size: 88px 88px, 88px 88px, 22px 22px, 22px 22px;
+  background-position: center center;
+}
+.atlas-paper::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: .085;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 140 140' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.78' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Cpath fill='%23676345' filter='url(%23n)' opacity='.9' d='M0 0h140v140H0z'/%3E%3C/svg%3E");
+}
+.atlas-relief { color: #969975; }
+.atlas-ticks { position: absolute; opacity: .36; }
+.atlas-ticks--x {
+  top: 0; left: 0; right: 0; height: 5px;
+  background: repeating-linear-gradient(to right, #7c8264 0 1px, transparent 1px 22px);
+}
+.atlas-ticks--y {
+  top: 0; right: 0; bottom: 0; width: 5px;
+  background: repeating-linear-gradient(to bottom, #7c8264 0 1px, transparent 1px 22px);
+}
+.atlas-compass {
+  position: absolute; top: 17px; right: 20px;
+  width: 36px; height: 49px; color: #777d61; opacity: .85;
+}
+.atlas-compass svg { display: block; width: 100%; height: 100%; }
+
+.atlas-map .react-flow {
+  width: 100%;
+  height: 100%;
+  --xy-background-color-default: transparent;
+  --xy-edge-stroke-default: #9b8452;
+  --xy-edge-stroke-width-default: 1.8;
+  --xy-node-border-default: none;
+}
+.atlas-map .react-flow__node-rulePin {
+  padding: 0;
+  appearance: none;
+  background: none;
+  border: 0;
+  border-radius: 2px;
+  box-shadow: none;
+  cursor: pointer;
+}
+.atlas-map .react-flow__node-rulePin:focus-visible {
+  outline: 2px solid #796126;
+  outline-offset: 3px;
+}
+.atlas-map .atlas-edge .react-flow__edge-path { stroke: #9e8b5c; stroke-width: 1.85px; }
+.atlas-map .atlas-edge--endangered .react-flow__edge-path { stroke: #ae503c; stroke-width: 2.5px; }
+.atlas-pin {
+  position: relative;
+  width: 100%; height: 100%;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+  text-align: center; cursor: pointer; user-select: none;
+}
+.atlas-pin .atlas-port {
+  width: 1px; height: 1px; min-width: 0; min-height: 0;
+  border: none; background: transparent; opacity: 0; pointer-events: none;
+}
+.atlas-pin__device {
+  position: relative;
+  z-index: 1;
+  height: 73px;
+  color: #685736;
+  filter: drop-shadow(0 2px 1px rgb(71 57 31 / 26%));
+  transition: transform .18s ease;
+}
+.atlas-pin__device::before {
+  content: '';
+  position: absolute; inset: 9px 4px 5px; z-index: -1;
+  border-radius: 50%; background: #ece7cf;
+  box-shadow: 0 0 11px 6px #ece7cf;
+}
+.atlas-pin__plaque {
+  position: relative;
+  z-index: 2;
+  display: grid; place-items: center;
+  width: calc(100% - 5px); min-height: 34px; box-sizing: border-box;
+  margin: -1px 0 0;
+  padding: 3px 12px 4px;
+  border: 1px solid #94815a;
+  background: linear-gradient(126deg, #fbf6e4 0%, #efe8cf 65%, #e4d8b6 100%);
+  box-shadow: inset 0 0 0 2px #eee5c9, inset 0 0 0 3px #c9bd98, 0 2px 2px rgb(54 53 34 / 15%);
+  color: #384337;
+  font: 650 14px/1.3 Georgia, 'Songti SC', 'Noto Serif CJK SC', SimSun, serif;
+  letter-spacing: .03em;
+  overflow: hidden;
+}
+.atlas-pin__plaque > span {
+  display: -webkit-box;
+  overflow: hidden; overflow-wrap: anywhere;
+  -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+.atlas-pin__plaque::before, .atlas-pin__plaque::after {
+  content: '';
+  position: absolute; top: calc(50% - 1.5px);
+  width: 3px; height: 3px; transform: rotate(45deg); background: #ae9a62;
+}
+.atlas-pin__plaque::before { left: 6px; }
+.atlas-pin__plaque::after { right: 6px; }
+.atlas-pin:hover .atlas-pin__device { transform: translateY(-2px); }
+.atlas-pin:hover .atlas-pin__plaque { border-color: #806b3b; }
+.atlas-pin--selected .atlas-pin__plaque {
+  color: #fff2ce;
+  background: linear-gradient(105deg, #364f41, #2e4337);
+  border-color: #867345;
+  box-shadow: inset 0 0 0 2px #344938, inset 0 0 0 3px #977f4f, 0 2px 2px rgb(54 53 34 / 20%);
+}
+.atlas-pin--selected .atlas-pin__device::before {
+  background: #f3e5a5;
+  box-shadow: 0 0 12px 9px rgb(222 195 106 / 42%);
+}
+.atlas-pin--endangered .atlas-pin__plaque {
+  color: #fff2df; background: #894936; border-color: #794431;
+  box-shadow: inset 0 0 0 2px #894936, inset 0 0 0 3px #bd8a66;
+}
+.atlas-pin--endangered .atlas-pin__device::before { background: #dba784; box-shadow: 0 0 12px 8px rgb(188 110 76 / 35%); }
+.atlas-map .atlas-tools {
+  position: absolute; z-index: 5; left: 14px; bottom: 13px;
+  display: flex; align-items: center; gap: 0;
+  padding: 2px; width: auto;
+  border: 1px solid #ada585; border-radius: 4px;
+  background: #f7f2e1; color: #4c5848;
+  box-shadow: 0 2px 4px rgb(54 60 35 / 12%);
+}
+.atlas-map .atlas-tools button {
+  display: grid; place-items: center;
+  width: 30px; height: 29px; min-height: 0;
+  padding: 0; border: 0; border-radius: 2px;
+  color: inherit; background: transparent; cursor: pointer;
+}
+.atlas-map .atlas-tools button:hover { background: #e5dec4; }
+.atlas-map .atlas-tools button:disabled { opacity: .4; cursor: default; }
+.atlas-tools button:focus-visible, .atlas-foundation button:focus-visible { outline: 2px solid #8c733a; outline-offset: 1px; }
+.atlas-map .atlas-tools output {
+  min-width: 35px; padding: 0 1px;
+  text-align: center; font: 11px/1 Consolas, monospace;
+  color: #69715b;
+}
+.atlas-map .atlas-tools .atlas-tools__fit { margin-left: 2px; border-left: 1px solid #d1c8ab; border-radius: 0; }
+.atlas-tools svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+
+.atlas-foundation {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 13px; text-align: center; pointer-events: none;
+}
+.atlas-seal {
+  position: relative; display: grid; place-items: center; width: 180px; height: 142px;
+  color: #9c956e;
+  background: radial-gradient(ellipse at center, #f8f1d6 2%, rgb(243 236 206 / 60%) 44%, transparent 70%);
+}
+.atlas-seal__plate { position: absolute; inset: 0; width: 100%; height: 100%; }
+.atlas-seal span { position: relative; display: flex; filter: drop-shadow(0 4px 2px rgb(62 54 32 / 25%)); }
+.atlas-foundation strong {
+  margin-top: -7px; color: #344939; font: 650 20px/1.4 Georgia, 'Songti SC', 'Noto Serif CJK SC', SimSun, serif; letter-spacing: .09em;
+}
+.atlas-foundation button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px; pointer-events: auto;
+  padding: 7px 13px; line-height: 1.4; min-height: 36px; border-radius: 3px;
+  border: 1px solid #8a7546; background: #f6efd6; color: #4f5135;
+  font-size: 13px; font-weight: 600; cursor: pointer;
+  box-shadow: inset 0 0 0 2px #f3eacf, 0 1px 2px rgb(74 67 39 / 18%);
+}
+.atlas-foundation button:enabled:hover { background: #eadfb9; }
+.atlas-foundation button:disabled { color: #686c58; border-color: #aaa58c; background: #e6e2d2; box-shadow: none; cursor: default; }
+@media (max-width: 600px) {
+  .atlas-compass { width: 28px; height: 39px; top: 12px; right: 13px; }
+  .atlas-pin__plaque { font-size: 18px; }
+  .atlas-map .atlas-tools { left: 9px; bottom: 9px; }
+  .atlas-map .atlas-tools button { width: 32px; height: 32px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .atlas-pin__device { transition: none; }
+}
