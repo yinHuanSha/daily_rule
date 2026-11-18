@@ -55,3 +55,7 @@ npm run test:browser
 Wide panoramic header illustration for a personal strategy atlas, 3:1 landscape. Original intricate vintage alpine topographic survey engraving, distant jagged ranges, one elegant small gold expedition pennant on the highest peak in the right half, rolling pine-studded ridgelines across the bottom, faint engraved contour hachures. Copperplate pale sage and restrained antique brass lines on a deep smoky forest-green ink ground #233a33. Main summit and lush detail strongly clustered on the right half; left third mostly calm uninterrupted deep dark green as copy space. Cunning chiaroscuro line engraving with olive ochre engraved highlights, atmospheric layer separation, sophisticated antique expedition field manual print. Full bleed edge-to-edge, no white border, no text letters or numbers, no logos, no icons or fake UI. Graphic monochrome etching, not a photograph.
 
 </details>
+
+## 开源许可
+
+项目代码采用 [MIT 许可证](LICENSE)。第三方依赖遵循各自的许可证。
