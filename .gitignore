@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.tsbuildinfo
+test-results/
+playwright-report/
+/.local/
+/如何提高自制力？ - 知乎.pdf
+daily-rule-backup*.json
+daily_rule_backup*.json
+*.local
