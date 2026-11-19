@@ -16,23 +16,29 @@ import { Emblem } from './Emblem'
 import { Dialog } from './RuleDialogs'
 import { localDay, parseBackup } from './model'
 import type { Category, Rule, TreeState } from './model'
-import { BackupConflict, loadTree, replaceTree } from './storage'
+import { BackupConflict, loadTree, replaceTree, saveReview } from './storage'
 
 export function History({
   rules,
   categories,
   available,
   onRetry,
+  afterSave,
 }: {
   rules: Rule[]
   categories: Category[]
   available: boolean
   onRetry: (rule: Rule) => void
+  afterSave: () => Promise<void>
 }) {
+  const [editing, setEditing] = useState<Rule | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
   const archived = rules
     .filter((rule) => rule.archivedAt)
     .sort((a, b) => b.archivedAt!.localeCompare(a.archivedAt!))
   const names = new Map(categories.map((category) => [category.id, category.name]))
+  const incidentTitles = new Map(archived.filter((rule) => rule.cause === 'breach').map((rule) => [rule.incidentId, rule.title]))
   return (
     <section className="section-card">
       <header className="section-header">
@@ -65,6 +71,24 @@ export function History({
                   <span>{names.get(rule.categoryId ?? '') ?? '未分类'}</span>
                   <time>{new Date(rule.archivedAt!).toLocaleDateString('zh-CN')}</time>
                 </div>
+                {rule.cause === 'breach' ? (
+                  <div className="history-review">
+                    {rule.review?.reason && <p><strong>失败原因</strong>　<span>{rule.review.reason}</span></p>}
+                    {rule.review?.improvement && <p><strong>改进计划</strong>　<span>{rule.review.improvement}</span></p>}
+                    <button
+                      type="button"
+                      className="button secondary"
+                      onClick={() => {
+                        setError('')
+                        setEditing(rule)
+                      }}
+                    >
+                      {rule.review ? '编辑复盘' : '补记复盘'}
+                    </button>
+                  </div>
+                ) : incidentTitles.has(rule.incidentId) && (
+                  <p>失守国策：{incidentTitles.get(rule.incidentId)}</p>
+                )}
               </div>
               <button
                 className="button secondary"
@@ -78,6 +102,46 @@ export function History({
             </li>
           ))}
         </ul>
+      )}
+      {editing && (
+        <Dialog title={`失守复盘 · ${editing.title}`} busy={saving} onClose={() => setEditing(null)}>
+          <form
+            className="rule-form"
+            onSubmit={async (event) => {
+              event.preventDefault()
+              if (saving) return
+              const data = new FormData(event.currentTarget)
+              setSaving(true)
+              setError('')
+              try {
+                await saveReview(editing.id, {
+                  reason: String(data.get('reason') ?? ''),
+                  improvement: String(data.get('improvement') ?? ''),
+                }, editing.review ?? null)
+                await afterSave()
+                setEditing(null)
+              } catch (err) {
+                setError(err instanceof Error ? err.message : '保存复盘失败，请重试。')
+              } finally {
+                setSaving(false)
+              }
+            }}
+          >
+            <label>
+              失败原因
+              <textarea name="reason" rows={3} defaultValue={editing.review?.reason} autoFocus />
+            </label>
+            <label>
+              改进计划
+              <textarea name="improvement" rows={3} defaultValue={editing.review?.improvement} />
+            </label>
+            {error && <p className="error" role="alert">{error}</p>}
+            <footer className="dialog-footer">
+              <button type="button" className="button secondary" disabled={saving} onClick={() => setEditing(null)}>取消</button>
+              <button className="button primary" disabled={saving}>保存复盘</button>
+            </footer>
+          </form>
+        </Dialog>
       )}
     </section>
   )
@@ -102,7 +166,7 @@ export function Backups({
       const url = URL.createObjectURL(new Blob([JSON.stringify(tree, null, 2)], { type: 'application/json' }))
       const anchor = document.createElement('a')
       anchor.href = url
-      anchor.download = 'daily-rule-backup-' + localDay() + '.json'
+      anchor.download = `daily-rule-backup-v${tree.version}-${localDay()}.json`
       document.body.append(anchor)
       anchor.click()
       anchor.remove()
@@ -131,7 +195,7 @@ export function Backups({
             <ArrowDownToLine />
           </div>
           <h2>导出备份</h2>
-          <p>把国策类别、整棵树、撤回历史和每日名额记录保存为 JSON 文件。</p>
+          <p>把国策类别、整棵树、撤回历史、失守复盘和每日名额记录保存为 JSON 文件。</p>
           <button className="button primary" onClick={exportFile}>
             <ArrowDownToLine size={16} />
             导出备份

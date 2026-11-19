@@ -73,11 +73,15 @@ async function importBackup(page, state) {
   await page.getByRole('dialog').waitFor({ state: 'detached' })
 }
 
-async function reportBreach(page, title, affected = [title]) {
+async function reportBreach(page, title, affected = [title], review) {
   await node(page, title).click()
   await button(page, '记录失守').click()
   const dialog = page.getByRole('dialog')
   for (const name of affected) await dialog.getByText(name, { exact: true }).waitFor()
+  if (review) {
+    await dialog.locator('textarea[name=reason]').fill(review.reason)
+    await dialog.locator('textarea[name=improvement]').fill(review.improvement)
+  }
   await button(page, '确认撤回').click()
   await node(page, title).waitFor({ state: 'detached' })
 }
@@ -149,7 +153,7 @@ async function installLegacyDatabase(context, state) {
 }
 
 function assertUpgrade(state, legacy) {
-  assert.equal(state.version, 2)
+  assert.equal(state.version, 3)
   assert.deepEqual(state.categories, defaultCategories)
   assert.deepEqual(state.rules, legacy.rules.map(rule => ({ ...rule, categoryId: null })))
 }
@@ -180,7 +184,7 @@ async function checkCategoryWorkflow(browser) {
   await ensureInstalled(page)
   assertUpgrade(await exportBackup(page), legacy)
   assert.equal(await page.evaluate(async () =>
-    (await indexedDB.databases()).find(db => db.name === 'daily-rule').version), 2)
+    (await indexedDB.databases()).find(db => db.name === 'daily-rule').version), 3)
   await navigate(page, '国策树')
   await page.getByLabel('空根节点', { exact: true }).waitFor()
   for (const category of defaultCategories) await page.getByLabel('类别：' + category.name, { exact: true }).waitFor()
@@ -318,7 +322,8 @@ try {
   await draft.getByLabel('国策名称').fill('保持所选上级')
   await draft.getByLabel('触发时机').fill('坐下时')
   await draft.getByLabel('具体行动').fill('翻开书')
-  await reportBreach(example, '示例国策 C', ['示例国策 C', '示例国策 F', '示例国策 H'])
+  const review = { reason: '书留在家里了', improvement: '前一晚把书放进包里' }
+  await reportBreach(example, '示例国策 C', ['示例国策 C', '示例国策 F', '示例国策 H'], review)
   await draft.waitForFunction(() => document.querySelector('select[name=parent] option:checked')?.disabled)
   assert.equal(await draft.getByLabel('上级国策').inputValue(), 'C', '撤回上级时不能静默切换为根节点')
   assert.ok(await button(draft, '建立国策').isDisabled())
@@ -328,17 +333,33 @@ try {
   assert.deepEqual(activeIds, ['B', 'D', 'E', 'G'])
   assert.deepEqual(result.rules.filter(rule => rule.cause === 'ancestor').map(rule => rule.id).sort(), ['F', 'H'])
   assert.deepEqual(result.rules.filter(rule => rule.cause === 'breach').map(rule => rule.id), ['C'])
+  assert.deepEqual(result.rules.find(rule => rule.id === 'C').review, review)
+  assert.ok(result.rules.filter(rule => rule.id !== 'C').every(rule => !rule.review))
   await navigate(example, '历史档案')
   const archive = example.getByRole('listitem').filter({ has: example.getByRole('heading', { name: '示例国策 C' }) })
+  await archive.getByText(review.reason, { exact: true }).waitFor()
+  await archive.getByText(review.improvement, { exact: true }).waitFor()
+  const revisedReview = { ...review, improvement: '睡前把书装进明天的背包' }
+  await button(archive, '编辑复盘').click()
+  const editDialog = example.getByRole('dialog')
+  assert.equal(await editDialog.locator('textarea[name=reason]').inputValue(), review.reason)
+  await editDialog.locator('textarea[name=improvement]').fill(revisedReview.improvement)
+  await button(editDialog, '保存复盘').click()
+  await editDialog.waitFor({ state: 'detached' })
   await button(archive, '重试').click()
+  const retryDialog = example.getByRole('dialog')
+  await retryDialog.getByText(review.reason, { exact: true }).waitFor()
+  await retryDialog.getByText(revisedReview.improvement, { exact: true }).waitFor()
   await example.getByLabel('上级国策').selectOption('E')
   await button(example, '建立国策').click()
   await example.getByRole('dialog').waitFor({ state: 'detached' })
   const retried = await exportBackup(example)
   assert.equal(retried.rules.length, result.rules.length + 1)
+  assert.deepEqual(retried.rules.find(rule => rule.id === 'C').review, revisedReview)
   const replacement = retried.rules.find(rule => rule.retryOf === 'C')
   assert.equal(replacement.parentId, 'E')
   assert.equal(replacement.archivedAt, null)
+  assert.equal(replacement.review, undefined)
   assert.deepEqual(retried.rules.filter(rule => rule.retryOf && rule.id !== replacement.id), [])
   console.log('通过 · 原文剪枝图例、两种历史归档原因、换分支单项重试')
 

@@ -1,5 +1,5 @@
-import { addToTree, addTreeCategory, decodeTree, emptyState, moveTreeBranchCategory, pruneBranch, removeTreeCategory, renameTreeCategory } from './model.ts'
-import type { Category, Rule, RuleInput, TreeState } from './model.ts'
+import { addToTree, addTreeCategory, decodeTree, emptyState, moveTreeBranchCategory, pruneBranch, removeTreeCategory, renameTreeCategory, updateReview } from './model.ts'
+import type { Category, Review, Rule, RuleInput, TreeState } from './model.ts'
 
 const dbName = 'daily-rule'
 const storeName = 'tree'
@@ -11,8 +11,8 @@ function openDatabase(): Promise<IDBDatabase> {
       reject(new Error('此浏览器无法使用本地数据库，请换用支持 IndexedDB 的浏览器。'))
       return
     }
-    // A v1 client explicitly opens version 1, so it cannot overwrite the upgraded snapshot.
-    const request = indexedDB.open(dbName, 2)
+    // Earlier clients open explicit versions and must not overwrite reviews with a legacy decoder.
+    const request = indexedDB.open(dbName, 3)
     let migrationError: unknown
     request.onupgradeneeded = event => {
       if (event.oldVersion === 0) {
@@ -140,8 +140,12 @@ export async function addRule(input: RuleInput): Promise<Rule> {
   return next.rules[next.rules.length - 1]
 }
 
-export async function pruneRule(id: string, expectedIds?: readonly string[]): Promise<void> {
-  await updateTree(state => pruneBranch(state, id, new Date(), expectedIds))
+export async function pruneRule(id: string, expectedIds?: readonly string[], review?: Review): Promise<void> {
+  await updateTree(state => pruneBranch(state, id, new Date(), expectedIds, review))
+}
+
+export async function saveReview(ruleId: string, review: Review, expectedReview?: Review | null): Promise<void> {
+  await updateTree(state => updateReview(state, ruleId, review, expectedReview))
 }
 
 export async function createCategory(name: string): Promise<Category> {

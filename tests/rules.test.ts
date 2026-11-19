@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { addToTree, addTreeCategory, emptyState, hasQuota, localDay, moveTreeBranchCategory, parseBackup, pruneBranch, removeTreeCategory, renameTreeCategory, subtreeIds } from '../src/model.ts'
+import { addToTree, addTreeCategory, emptyState, hasQuota, localDay, moveTreeBranchCategory, parseBackup, pruneBranch, removeTreeCategory, renameTreeCategory, subtreeIds, updateReview } from '../src/model.ts'
 import type { RuleInput, TreeState } from '../src/model.ts'
 
 function input(title: string, parentId: string | null = null): RuleInput {
@@ -68,7 +68,7 @@ test('stale previews, stale parent and retry sources cannot create unintended ch
 test('version, structure, local dates, daily quota and graph consistency are checked on import', () => {
   assert.deepEqual(parseBackup(JSON.stringify(emptyState())), emptyState())
   assert.throws(() => parseBackup('{'), /JSON/)
-  assert.throws(() => parseBackup('{"version":3,"rules":[]}'), /版本/)
+  assert.throws(() => parseBackup('{"version":4,"rules":[]}'), /版本/)
   assert.throws(() => parseBackup('{"version":1,"rules":[{"id":"x"}]}'), /字段/)
   const original = tree()
   const invalid = (change: (state: TreeState) => void) => {
@@ -130,14 +130,14 @@ test('names are trimmed, unique, and reserve the display name for uncategorized 
   assert.equal(renameTreeCategory(added, 'x', '新名').categories.at(-1)?.id, 'x')
 })
 
-test('v1 migrates every rule without guessing its category; v2 round-trips with empty categories', () => {
+test('v1 migrates every rule without guessing its category; v2 migrates with empty categories', () => {
   const first = pruneBranch(tree(), 'C', new Date(2026, 5, 8))
   const next = addToTree(first, { ...input('C', 'E'), retryOf: 'C' }, new Date(2026, 5, 9), 'retry')
   const legacy = { version: 1, rules: next.rules.map(({categoryId, ...rule}) => rule) }
   const migrated = parseBackup(JSON.stringify(legacy))
   assert.deepEqual(migrated, next)
   const noCategories = { ...migrated, categories: [] }
-  assert.deepEqual(parseBackup(JSON.stringify(noCategories)), noCategories)
+  assert.deepEqual(parseBackup(JSON.stringify({...noCategories, version: 2})), noCategories)
 })
 
 test('v2 rejects malformed category definitions and category assignments, including history', () => {
@@ -153,4 +153,36 @@ test('v2 rejects malformed category definitions and category assignments, includ
   }
   const detached = records.rules.map(rule => rule.id === 'F' ? {...rule, categoryId:'work'} : rule)
   assert.throws(() => parseBackup(serialize(records.categories, detached)), /类别不一致/)
+})
+
+
+test('a breach stores one trimmed review and keeps it attached to its original incident', () => {
+  const day = new Date(2026, 5, 10)
+  const note = { reason: ' 太晚了 ', improvement: '  ' }
+  const marked = pruneBranch(tree(), 'C', day, undefined, note)
+  const root = marked.rules.find(rule => rule.id === 'C')!
+  assert.deepEqual(root.review, { reason: '太晚了', improvement: '' })
+  assert.equal(marked.rules.find(rule => rule.id === 'H')?.incidentId, 'C')
+  assert.equal(marked.rules.filter(rule => rule.review).length, 1)
+  assert.throws(() => updateReview(marked, 'H', note), /主动失守/)
+  assert.throws(() => updateReview(marked, 'B', note), /主动失守/)
+  const edited = updateReview(marked, 'C', { reason: '', improvement: ' 提早开始 ' }, root.review)
+  const outer = pruneBranch(edited, 'B', day, undefined, { reason: ' ', improvement: '' })
+  const restored = parseBackup(JSON.stringify(outer))
+  assert.deepEqual(restored, outer)
+  const saved = restored.rules.find(rule => rule.id === 'C')!.review!
+  assert.deepEqual(saved, {reason: '', improvement: '提早开始'})
+  const cleared = updateReview(restored, 'C', { reason: '', improvement: ' ' }, saved)
+  assert.ok(cleared.rules.every(rule => !('review' in rule)))
+  const retry = addToTree(edited, {...input('重试'), retryOf:'C'}, day, 'again')
+  assert.equal(retry.rules.at(-1)?.review, undefined)
+})
+
+test('backups with invalid review fields or a review on an active or inherited node are rejected', () => {
+  const state = pruneBranch(tree(), 'C', new Date(2026, 5, 10))
+  const withReview = (id: string, review: unknown) => JSON.stringify({ ...state, rules: state.rules.map(rule => rule.id === id ? {...rule, review} : rule) })
+  for (const id of ['B', 'F']) assert.throws(() => parseBackup(withReview(id, {reason:'原因', improvement:''})), /仅主动失守/)
+  for (const invalid of [null, 'legacy text', {reason: true, improvement:''}, {reason:'原因'}]) {
+    assert.throws(() => parseBackup(withReview('C', invalid)), /文本/)
+  }
 })

@@ -15,7 +15,13 @@ export interface RuleInput {
   retryOf?: string | null
 }
 
+export interface Review {
+  reason: string
+  improvement: string
+}
+
 export interface Rule extends RuleInput {
+  review?: Review
   id: string
   categoryId: string | null
   createdAt: string
@@ -27,14 +33,14 @@ export interface Rule extends RuleInput {
 }
 
 export interface TreeState {
-  version: 2
+  version: 3
   categories: Category[]
   rules: Rule[]
 }
 
 export function emptyState(): TreeState {
   return {
-    version: 2,
+    version: 3,
     categories: [
       { id: 'life', name: '生活国策' },
       { id: 'study', name: '学习国策' },
@@ -102,18 +108,46 @@ export function subtreeIds(state: TreeState, rootId: string, includeArchived = f
   return ids
 }
 
-export function pruneBranch(state: TreeState, rootId: string, now: Date, expectedIds?: readonly string[]): TreeState {
+function normalizedReview(value: unknown): Review | undefined {
+  if (value === undefined) return undefined
+  if (!isObject(value) || typeof value.reason !== 'string' || typeof value.improvement !== 'string') {
+    throw new Error('复盘的失守原因和改进方式须为文本。')
+  }
+  const reason = value.reason.trim()
+  const improvement = value.improvement.trim()
+  return reason || improvement ? { reason, improvement } : undefined
+}
+
+export function updateReview(state: TreeState, ruleId: string, review: Review, expectedReview?: Review | null): TreeState {
+  const rule = state.rules.find(entry => entry.id === ruleId)
+  if (!rule?.archivedAt || rule.cause !== 'breach') throw new Error('仅可为主动失守的国策保存复盘。')
+  const expected = normalizedReview(expectedReview ?? undefined)
+  if (rule.review?.reason !== expected?.reason || rule.review?.improvement !== expected?.improvement) {
+    throw new Error('这条复盘已在别处更新，请重新打开并核对后再保存。')
+  }
+  const next = normalizedReview(review)
+  const updated = { ...rule }
+  if (next) updated.review = next
+  else delete updated.review
+  return { ...state, rules: state.rules.map(entry => entry.id === ruleId ? updated : entry) }
+}
+
+export function pruneBranch(state: TreeState, rootId: string, now: Date, expectedIds?: readonly string[], review?: Review): TreeState {
   const affected = new Set(subtreeIds(state, rootId))
   if (!affected.size) throw new Error('这项国策已退出当前树。')
   if (expectedIds && (affected.size !== expectedIds.length || expectedIds.some(id => !affected.has(id)))) {
     throw new Error('这条分支已有变化，请重新查看受影响的国策后再确认。')
   }
+  const note = normalizedReview(review)
   const archivedAt = now.toISOString()
   return {
     ...state,
-    rules: state.rules.map(rule => affected.has(rule.id)
-      ? { ...rule, archivedAt, incidentId: rootId, cause: rule.id === rootId ? 'breach' : 'ancestor' }
-      : rule),
+    rules: state.rules.map(rule => {
+      if (!affected.has(rule.id)) return rule
+      const archived: Rule = { ...rule, archivedAt, incidentId: rootId, cause: rule.id === rootId ? 'breach' : 'ancestor' }
+      if (rule.id === rootId && note) archived.review = note
+      return archived
+    }),
   }
 }
 
@@ -201,6 +235,8 @@ function readRule(value: unknown, legacy: boolean): Rule {
     || !(value.incidentId === null || isText(value.incidentId))) {
     throw new Error('备份中的国策字段不完整或格式有误。')
   }
+  const review = normalizedReview(value.review)
+  if (review && value.cause !== 'breach') throw new Error('备份中仅主动失守的国策可以包含复盘。')
   const categoryId = legacy ? null : value.categoryId
   if (!(categoryId === null || isText(categoryId))) throw new Error('备份中的国策缺少有效的类别字段。')
   if ((value.archivedAt === null) !== (value.cause === null)
@@ -208,6 +244,7 @@ function readRule(value: unknown, legacy: boolean): Rule {
     throw new Error('备份中的国策归档信息不一致。')
   }
   return {
+    ...(review ? { review } : {}),
     id: value.id, parentId: value.parentId, categoryId, title: value.title, trigger: value.trigger,
     action: value.action, badge: value.badge as Badge, createdAt: value.createdAt, day: value.day,
     archivedAt: value.archivedAt, cause: value.cause, incidentId: value.incidentId, retryOf: value.retryOf,
@@ -275,14 +312,14 @@ function readCategories(value: unknown): Category[] {
 }
 
 export function decodeTree(value: unknown): TreeState {
-  if (!isObject(value) || (value.version !== 1 && value.version !== 2) || !Array.isArray(value.rules)) {
+  if (!isObject(value) || (value.version !== 1 && value.version !== 2 && value.version !== 3) || !Array.isArray(value.rules)) {
     throw new Error('不支持的备份格式或版本。')
   }
   const legacy = value.version === 1
   const categories = legacy ? emptyState().categories : readCategories(value.categories)
   const rules = value.rules.map(entry => readRule(entry, legacy))
   validateLinks(rules, categories)
-  return { version: 2, categories, rules }
+  return { version: 3, categories, rules }
 }
 
 export function parseBackup(raw: string): TreeState {

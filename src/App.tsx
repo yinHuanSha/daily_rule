@@ -429,6 +429,7 @@ export default function App() {
                   rules={tree.rules}
                   categories={tree.categories}
                   available={available}
+                  afterSave={refresh}
                   onRetry={(r) => beginAdd(null, r.categoryId, r)}
                 />
               )}
@@ -445,6 +446,8 @@ export default function App() {
           categoryId={overlay.categoryId}
           parentId={overlay.parentId}
           retry={overlay.retry}
+          breach={overlay.retry && tree.rules.find((rule) =>
+            rule.cause === 'breach' && rule.incidentId === overlay.retry?.incidentId)}
           onClose={() => setOverlay(null)}
           onSave={async (input) => {
             const created = await addRule(input)
@@ -526,10 +529,11 @@ export default function App() {
         <PruneDialog
           rules={overlay.rules}
           onClose={() => setOverlay(null)}
-          onConfirm={async () => {
+          onConfirm={async (review) => {
             await pruneRule(
               overlay.rules[0].id,
               overlay.rules.map((r) => r.id),
+              review,
             )
             await refresh()
             setOverlay(null)

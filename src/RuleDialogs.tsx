@@ -11,7 +11,7 @@ import {
   X,
 } from 'lucide-react'
 import { Emblem } from './Emblem'
-import type { Badge, Category, Rule, RuleInput } from './model'
+import type { Badge, Category, Review, Rule, RuleInput } from './model'
 
 export function Dialog({
   title,
@@ -74,6 +74,7 @@ export function RuleForm({
   categoryId,
   parentId,
   retry,
+  breach,
   onClose,
   onSave,
 }: {
@@ -82,6 +83,7 @@ export function RuleForm({
   categoryId: string | null
   parentId: string | null
   retry?: Rule
+  breach?: Rule
   onClose: () => void
   onSave: (input: RuleInput) => Promise<void>
 }) {
@@ -123,6 +125,15 @@ export function RuleForm({
       busy={pending}
     >
       <form className="rule-form" onSubmit={submit}>
+        {breach?.review && (
+          <section className="retry-review">
+            <h3>{breach.id === retry?.id ? '上次失守复盘' : `上级国策「${breach.title}」的失守复盘`}</h3>
+            <dl className="details">
+              {breach.review.reason && <><dt>失败原因</dt><dd>{breach.review.reason}</dd></>}
+              {breach.review.improvement && <><dt>改进计划</dt><dd>{breach.review.improvement}</dd></>}
+            </dl>
+          </section>
+        )}
         <label>
           国策名称
           <input
@@ -346,8 +357,10 @@ export function PruneDialog({
 }: {
   rules: Rule[]
   onClose: () => void
-  onConfirm: () => Promise<void>
+  onConfirm: (review: Review) => Promise<void>
 }) {
+  const [reason, setReason] = useState('')
+  const [improvement, setImprovement] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   return (
@@ -365,7 +378,18 @@ export function PruneDialog({
             </li>
           ))}
         </ul>
-        <p className="muted">撤回记录会保存在历史档案中。</p>
+        <fieldset className="rule-form review-fields" disabled={busy}>
+          <legend>「{rules[0].title}」的失守复盘（选填）</legend>
+          <label>失败原因
+            <textarea name="reason" value={reason} onChange={(e) => setReason(e.target.value)}
+              placeholder="例如：手机在床边充电，关灯后又拿起来刷了。" />
+          </label>
+          <label>改进计划
+            <textarea name="improvement" value={improvement} onChange={(e) => setImprovement(e.target.value)}
+              placeholder="例如：把充电线移到客厅，睡前把手机留在那里。" />
+          </label>
+        </fieldset>
+        <p className="muted">确认后可在历史档案中查看或补写复盘。</p>
         {error && (
           <p role="alert" className="error">
             {error}
@@ -382,7 +406,7 @@ export function PruneDialog({
               setBusy(true)
               setError('')
               try {
-                await onConfirm()
+                await onConfirm({ reason, improvement })
               } catch (err) {
                 setError(err instanceof Error ? err.message : '未能保存')
                 setBusy(false)

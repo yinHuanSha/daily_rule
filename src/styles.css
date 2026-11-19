@@ -1338,3 +1338,17 @@ main {
     animation-duration: 0s !important;
   }
 }
+
+.review-fields {
+  min-width: 0;
+  margin: 16px 0;
+  padding: 12px 0 0;
+  border: 0;
+}
+.review-fields legend, .retry-review h3 { font-size: 14px; font-weight: 650; }
+.retry-review { background: #f2f3e9; border-radius: 6px; padding: 12px 16px; }
+.retry-review h3, .retry-review dl { margin: 0; }
+.retry-review dd { white-space: pre-wrap; overflow-wrap: anywhere; }
+.history-review { margin-top: 10px; }
+.history-review span { white-space: pre-wrap; }
+.history-review button { margin-top: 6px; }
