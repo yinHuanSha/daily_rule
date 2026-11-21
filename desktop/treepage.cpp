@@ -4,8 +4,10 @@
 #include <QtWidgets>
 #include <algorithm>
 #include <cmath>
+#include <deque>
 #include <exception>
 #include <utility>
+#include <vector>
 
 namespace {
 QString field(const QJsonObject& rule, const char* name) {
@@ -96,58 +98,95 @@ QDialogButtonBox* dialogActions(QDialog& dialog, QBoxLayout* layout, const QStri
     return buttons;
 }
 
-struct Branch {
-    enum Kind { Root, Category, Rule } kind;
-    QString key;
-    QString parent;
-    QJsonObject data;
-    QVector<int> children;
-    qreal x = 0;
-    qreal y = 0;
-    qreal height() const { return kind == Root ? 40 : kind == Category ? 40 : 92; }
-};
+enum class PinKind { Root, Category, Rule };
 
 class Pin final : public QGraphicsItem {
 public:
-    Pin(Branch::Kind kind, QString title, QString badge, bool threatened, std::function<void()> clicked)
-        : kind_(kind), title_(std::move(title)), icon_(kind == Branch::Rule ? QPixmap(emblemPath(badge)) : QPixmap()),
+    Pin(PinKind kind, QString title, QString badge, bool threatened, std::function<void()> clicked)
+        : kind_(kind), icon_(kind == PinKind::Rule ? QPixmap(emblemPath(badge)) : QPixmap()),
           threatened_(threatened), clicked_(std::move(clicked)) {
         setAcceptHoverEvents(true);
         setFlag(ItemIsFocusable);
         setCursor(Qt::PointingHandCursor);
-        setToolTip(title_);
-    }
-    QRectF boundingRect() const override {
-        if (kind_ == Branch::Root) return {-21, 0, 42, 40};
-        return {-79, 0, 158, kind_ == Branch::Rule ? 92. : 40.};
-    }
-    void paint(QPainter* p, const QStyleOptionGraphicsItem* style, QWidget*) override {
-        p->setRenderHint(QPainter::Antialiasing);
-        const bool hot = style->state.testFlag(QStyle::State_MouseOver) || hasFocus();
-        const QColor line = threatened_ ? QColor("#b35942") : hot ? QColor("#54765a") : QColor("#a39568");
-        p->setPen(QPen(line, hot || threatened_ ? 2.5 : 1.2));
-        p->setBrush(threatened_ ? QColor("#f8ded0") : QColor("#f7f3df"));
-        if (kind_ == Branch::Root) {
-            const QPolygonF diamond(QVector<QPointF>{{0, 2}, {18, 20}, {0, 38}, {-18, 20}});
-            p->drawPolygon(diamond);
-            p->translate(0, 20);
-            p->rotate(45);
-            p->setBrush(QColor("#829274"));
-            p->drawRect(QRectF(-5, -5, 10, 10));
+        setToolTip(title);
+        if (kind == PinKind::Root) {
+            face_ = QRectF(-15, 0, 30, 30);
             return;
         }
-        QRectF label(-76, kind_ == Branch::Rule ? 58 : 3, 152, 32);
-        p->drawRoundedRect(label, 5, 5);
-        if (kind_ == Branch::Rule) {
-            p->setRenderHint(QPainter::SmoothPixmapTransform);
-            p->drawPixmap(QRectF(-37, 0, 74, 64), icon_, icon_.rect());
-        }
+
+        const bool rule = kind == PinKind::Rule;
+        const qreal textLeft = rule ? 69 : 32;
+        const qreal textRight = rule ? 16 : 18;
         QFont font = QApplication::font();
-        font.setPixelSize(14);
-        font.setBold(true);
-        p->setFont(font);
-        p->setPen(QColor("#314737"));
-        p->drawText(label, Qt::AlignCenter, QFontMetrics(font).elidedText(title_, Qt::ElideRight, 140));
+        font.setPixelSize(rule ? 15 : 14);
+        font.setWeight(rule ? QFont::Medium : QFont::DemiBold);
+        // Lay out and paint the same shaped lines, including punctuation and mixed scripts.
+        text_.setText(title.replace('\n', QChar::LineSeparator));
+        text_.setFont(font);
+        QTextOption option;
+        option.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+        text_.setTextOption(option);
+        text_.setCacheEnabled(true);
+        const qreal width = std::clamp(std::ceil(QFontMetricsF(font).horizontalAdvance(title)) +
+                                       textLeft + textRight, rule ? 158.0 : 102.0, rule ? 258.0 : 190.0);
+        text_.beginLayout();
+        qreal textHeight = 0;
+        while (true) {
+            auto line = text_.createLine();
+            if (!line.isValid()) break;
+            line.setLineWidth(width - textLeft - textRight);
+            line.setPosition({0, textHeight});
+            textHeight += line.height() + 2;
+        }
+        text_.endLayout();
+        textHeight = std::max(0.0, textHeight - 2);
+        const qreal height = std::max(rule ? 64.0 : 34.0, textHeight + (rule ? 24 : 12));
+        face_ = QRectF(-width / 2, 0, width, height);
+        textOrigin_ = QPointF(face_.left() + textLeft, (height - textHeight) / 2);
+    }
+    QRectF boundingRect() const override { return face_.adjusted(-2, -2, 2, 4); }
+    const QRectF& face() const { return face_; }
+
+    void paint(QPainter* p, const QStyleOptionGraphicsItem* style, QWidget*) override {
+        p->setRenderHints(QPainter::Antialiasing | QPainter::TextAntialiasing | QPainter::SmoothPixmapTransform);
+        const bool hot = style->state.testFlag(QStyle::State_MouseOver) || hasFocus();
+        if (kind_ == PinKind::Root) {
+            const QPolygonF diamond(QVector<QPointF>{{0, 0}, {15, 15}, {0, 30}, {-15, 15}});
+            p->setPen(QPen(hot ? QColor("#436952") : QColor("#9f9164"), hot ? 2 : 1.2));
+            p->setBrush(QColor("#faf6e7"));
+            p->drawPolygon(diamond);
+            p->setPen(Qt::NoPen);
+            p->setBrush(QColor("#48624e"));
+            p->drawPolygon(QPolygonF(QVector<QPointF>{{0, 8}, {7, 15}, {0, 22}, {-7, 15}}));
+            return;
+        }
+
+        const bool rule = kind_ == PinKind::Rule;
+        const qreal radius = rule ? 9 : 6;
+        p->setPen(Qt::NoPen);
+        p->setBrush(QColor(71, 66, 42, 22));
+        p->drawRoundedRect(face_.translated(0, 2), radius, radius);
+        const QColor border = threatened_ ? QColor("#a75540") : hot ? QColor("#486e54") :
+                              rule ? QColor("#c2b897") : QColor("#405e4b");
+        const QColor fill = rule ? (threatened_ ? QColor("#fff0e7") : QColor("#fffdf5")) :
+                                   (hot ? QColor("#466b54") : QColor("#324f40"));
+        p->setPen(QPen(border, hot || threatened_ ? 2 : 1));
+        p->setBrush(fill);
+        p->drawRoundedRect(face_, radius, radius);
+
+        const qreal left = face_.left(), middle = face_.center().y();
+        if (rule) {
+            p->drawPixmap(QRectF(left + 5, middle - 23.4, 54, 46.8), icon_, icon_.rect());
+            p->setPen(QPen(QColor("#dfd8c2"), 1));
+            p->drawLine(QPointF(left + 59, middle - 13), QPointF(left + 59, middle + 13));
+        } else {
+            p->setPen(Qt::NoPen);
+            p->setBrush(QColor("#dbcb99"));
+            const qreal x = left + 18;
+            p->drawPolygon(QPolygonF(QVector<QPointF>{{x, middle - 4}, {x + 4, middle}, {x, middle + 4}, {x - 4, middle}}));
+        }
+        p->setPen(rule ? QColor("#253f32") : QColor("#fffbed"));
+        text_.draw(p, textOrigin_);
     }
 protected:
     void mousePressEvent(QGraphicsSceneMouseEvent* event) override { event->accept(); }
@@ -160,11 +199,50 @@ protected:
         else QGraphicsItem::keyPressEvent(event);
     }
 private:
-    Branch::Kind kind_;
-    QString title_;
+    PinKind kind_;
     QPixmap icon_;
     bool threatened_;
     std::function<void()> clicked_;
+    QRectF face_;
+    QTextLayout text_;
+    QPointF textOrigin_;
+};
+
+struct Branch {
+    PinKind kind;
+    QString key;
+    QString parent;
+    QJsonObject data;
+    QVector<int> children;
+    Pin* pin = nullptr;
+    int depth = 0;
+    qreal x = 0;
+};
+
+// The left and right edges occupied at each depth. An empty category only
+// takes space on its own row; a wide group of cards can fan out beneath it.
+struct BranchContour {
+    std::deque<std::pair<qreal, qreal>> rows;
+    qreal offset = 0;
+
+    qreal placeSibling(BranchContour sibling) {
+        constexpr qreal gap = 24;
+        const auto shared = std::min(rows.size(), sibling.rows.size());
+        qreal x = 0;
+        for (size_t d = 0; d < shared; ++d)
+            x = std::max(x, rows[d].second + offset + gap - (sibling.rows[d].first + sibling.offset));
+        sibling.offset += x;
+        // Reuse the deeper contour so adding a child to a long chain is cheap.
+        if (rows.size() >= sibling.rows.size()) {
+            for (size_t d = 0; d < shared; ++d)
+                rows[d].second = sibling.rows[d].second + sibling.offset - offset;
+        } else {
+            for (size_t d = 0; d < shared; ++d)
+                sibling.rows[d].first = rows[d].first + offset - sibling.offset;
+            *this = std::move(sibling);
+        }
+        return x;
+    }
 };
 
 class Banner final : public QFrame {
@@ -337,59 +415,33 @@ void TreePage::apply(const QJsonObject& updated) {
 void TreePage::buildMap(bool fit) {
     const bool all = filter_->currentIndex() <= 0;
     const QString only = filter_->currentData().toString();
-    QVector<Branch> nodes{{Branch::Root, "root", {}, {}, {}}};
+    QVector<Branch> nodes{{PinKind::Root, "root", {}, {}, {}}};
     for (const auto& item : displayed().value("categories").toArray()) {
         const auto category = item.toObject();
         const auto id = field(category, "id");
         if (all || only == id)
-            nodes.append({Branch::Category, "cat/" + id, "root", category, {}});
+            nodes.append({PinKind::Category, "cat/" + id, "root", category, {}});
     }
     for (const auto& rule : activeRules(displayed())) {
         const auto category = field(rule, "categoryId");
         if (!all && only != category) continue;
         QString parent = field(rule, "parentId");
         const QString key = !parent.isEmpty() ? "rule/" + parent : category.isEmpty() ? QString("root") : "cat/" + category;
-        nodes.append({Branch::Rule, "rule/" + field(rule, "id"), key, rule, {}});
+        nodes.append({PinKind::Rule, "rule/" + field(rule, "id"), key, rule, {}});
     }
     QHash<QString, int> indices;
     for (int i = 0; i < nodes.size(); ++i) indices.insert(nodes[i].key, i);
     for (int i = 1; i < nodes.size(); ++i) nodes[indices.value(nodes[i].parent)].children.append(i);
-    QVector<int> stack{0}, order;
-    qreal column = 0;
-    while (!stack.isEmpty()) {
-        const int i = stack.takeLast();
-        auto& node = nodes[i];
-        order.append(i);
-        if (node.children.isEmpty()) { node.x = column; column += 178; }
-        for (auto it = node.children.crbegin(); it != node.children.crend(); ++it) {
-            nodes[*it].y = node.y + node.height() + 34;
-            stack.append(*it);
-        }
-    }
-    for (auto it = order.crbegin(); it != order.crend(); ++it) {
-        auto& node = nodes[*it];
-        if (!node.children.isEmpty()) node.x = (nodes[node.children.first()].x + nodes[node.children.last()].x) / 2;
-    }
     scene_->clear();
-    for (const auto& node : nodes) {
-        const bool marked = node.kind == Branch::Rule && threatened_.contains(field(node.data, "id"));
-        if (!node.parent.isEmpty()) {
-            const auto& parent = nodes[indices.value(node.parent)];
-            const auto startY = parent.y + parent.height();
-            const auto midY = (startY + node.y) / 2;
-            QPainterPath connector(QPointF(parent.x, startY));
-            connector.lineTo(parent.x, midY);
-            connector.lineTo(node.x, midY);
-            connector.lineTo(node.x, node.y);
-            scene_->addPath(connector, QPen(QColor(marked ? "#ac6046" : "#a19873"), 2))->setZValue(-1);
-        }
-        const auto title = node.kind == Branch::Root ? QString("空根 · 类别管理") :
-                           field(node.data, node.kind == Branch::Rule ? "title" : "name");
+    for (auto& node : nodes) {
+        const bool marked = node.kind == PinKind::Rule && threatened_.contains(field(node.data, "id"));
+        const auto title = node.kind == PinKind::Root ? QString("空根 · 类别管理") :
+                           field(node.data, node.kind == PinKind::Rule ? "title" : "name");
         auto open = [this, kind=node.kind, data=node.data, example=demo_] {
             QTimer::singleShot(0, this, [=] {
                 if (example != demo_) return;
-                if (kind == Branch::Rule) openRule(data);
-                else if (kind == Branch::Category) openCategory(data);
+                if (kind == PinKind::Rule) openRule(data);
+                else if (kind == PinKind::Category) openCategory(data);
                 else if (!demo_) manageCategories_();
                 else {
                     const auto categories = demoState_.value("categories").toArray();
@@ -402,9 +454,58 @@ void TreePage::buildMap(bool fit) {
                 }
             });
         };
-        auto* pin = new Pin(node.kind, title, field(node.data, "badge"), marked, open);
-        scene_->addItem(pin);
-        pin->setPos(node.x, node.y);
+        node.pin = new Pin(node.kind, title, field(node.data, "badge"), marked, open);
+        scene_->addItem(node.pin);
+    }
+
+    constexpr qreal levelGap = 38;
+    QVector<int> order{0};
+    QVector<qreal> rowHeight;
+    for (int k = 0; k < order.size(); ++k) {
+        auto& node = nodes[order[k]];
+        if (node.depth == rowHeight.size()) rowHeight.append(0);
+        rowHeight[node.depth] = std::max(rowHeight[node.depth], node.pin->face().height());
+        for (int child : node.children) {
+            nodes[child].depth = node.depth + 1;
+            order.append(child);
+        }
+    }
+    std::vector<BranchContour> contours(nodes.size());
+    for (auto it = order.crbegin(); it != order.crend(); ++it) {
+        const auto& node = nodes[*it];
+        auto& contour = contours[*it];
+        if (!node.children.isEmpty()) {
+            contour = std::move(contours[node.children.first()]);
+            for (int c = 1; c < node.children.size(); ++c) {
+                const int child = node.children[c];
+                nodes[child].x = contour.placeSibling(std::move(contours[child]));
+            }
+            const qreal middle = nodes[node.children.last()].x / 2;
+            for (int child : node.children) nodes[child].x -= middle;
+            contour.offset -= middle;
+        }
+        const auto bounds = node.pin->boundingRect();
+        contour.rows.emplace_front(bounds.left() - contour.offset, bounds.right() - contour.offset);
+    }
+    QVector<qreal> rowTop{0};
+    for (qreal height : rowHeight) rowTop.append(rowTop.last() + height + levelGap);
+    for (int i : order) {
+        auto& node = nodes[i];
+        const qreal top = rowTop[node.depth];
+        node.pin->setPos(node.x, top);
+        for (int child : node.children) {
+            auto& branch = nodes[child];
+            branch.x += node.x;
+            const qreal nextTop = rowTop[branch.depth];
+            const qreal busY = nextTop - levelGap / 2;
+            QPainterPath line(QPointF(node.x, top + node.pin->face().height()));
+            line.lineTo(node.x, busY);
+            line.lineTo(branch.x, busY);
+            line.lineTo(branch.x, nextTop);
+            const bool marked = threatened_.contains(field(branch.data, "id")) && branch.kind == PinKind::Rule;
+            scene_->addPath(line, QPen(QColor(marked ? "#ac6046" : "#aba483"), 1.4,
+                                      Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin))->setZValue(-1);
+        }
     }
     scene_->setSceneRect(scene_->itemsBoundingRect().adjusted(-28, -16, 28, 20));
     if (fit) map_->fit();

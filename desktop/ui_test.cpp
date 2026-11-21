@@ -4,6 +4,7 @@
 
 #include <QtWidgets>
 #include <QtTest/QTest>
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
@@ -31,16 +32,29 @@ QDialog* currentDialog(const QString& title) {
     return widget;
 }
 
+QGraphicsItem* findPin(TreePage& tree, const QString& title) {
+    auto* view = tree.findChild<QGraphicsView*>();
+    for (auto* item : view->scene()->items())
+        if (item->toolTip() == title) return item;
+    verify(false, "Missing map pin " + title);
+    return nullptr;
+}
+
 void openPin(TreePage& tree, const QString& title) {
     auto* view = tree.findChild<QGraphicsView*>();
-    for (auto* item : view->scene()->items()) {
-        if (item->toolTip() != title) continue;
-        const auto pos = view->mapFromScene(item->sceneBoundingRect().center());
-        verify(view->viewport()->rect().contains(pos), "Pin is outside the viewport");
-        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, pos);
-        return;
-    }
-    verify(false, "Missing map pin " + title);
+    const auto pos = view->mapFromScene(findPin(tree, title)->sceneBoundingRect().center());
+    verify(view->viewport()->rect().contains(pos), "Pin is outside the viewport");
+    QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, pos);
+}
+
+QImage renderPin(TreePage& tree, const QString& title) {
+    auto* pin = findPin(tree, title);
+    const auto bounds = pin->sceneBoundingRect();
+    QImage image(bounds.size().toSize(), QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+    QPainter painter(&image);
+    pin->scene()->render(&painter, QRectF(image.rect()), bounds);
+    return image;
 }
 }
 
@@ -61,6 +75,8 @@ int main(int argc, char** argv) {
     const QString title = "放下手机";
     const QString reason = "等待通知时拿起了手机";
     const QString improvement = "打开专注模式再开始工作";
+    const QString longPrefix = "离开阅览室前，把借来的书逐本核对，再放回对应书架的第";
+    const QString longTitle = longPrefix + "三层";
     const QString output = app.arguments().value(1);
     auto capture = [&](QWidget* widget, const QString& basename) {
         if (output.isEmpty()) return;
@@ -159,6 +175,54 @@ int main(int argc, char** argv) {
         const auto rules = Store(path).load().value("rules").toArray();
         verify(rules.size() == 3 && rules.last().toObject().value("retryOf").toString() == originalId &&
                rules.last().toObject().value("archivedAt").isNull(), "Retry did not create one new active rule");
+        history.reset();
+        auto fixture = store.load();
+        const QStringList titles{"离座时收好笔记", longTitle, "晚饭后把第二天要带的书放进书包", "核对归还日期"};
+        QJsonArray branches;
+        for (int i = 0; i < titles.size(); ++i) {
+            auto rule = rules.last().toObject();
+            const QDate date = QDate(2020, 1, 1).addDays(i);
+            rule["id"] = QString::number(i);
+            rule["parentId"] = i == 3 ? QJsonValue("1") : QJsonValue::Null;
+            rule["categoryId"] = "life";
+            rule["title"] = titles[i];
+            rule["retryOf"] = QJsonValue::Null;
+            rule["createdAt"] = date.toString(Qt::ISODate) + "T09:00:00.000Z";
+            rule["day"] = date.toString(Qt::ISODate);
+            branches.append(rule);
+        }
+        tree.resize(1160, 680);
+        fixture["rules"] = branches;
+        tree.refresh(fixture);
+        QList<QRectF> occupied;
+        for (auto* item : tree.findChild<QGraphicsView*>()->scene()->items()) {
+            if (item->toolTip().isEmpty()) continue;
+            const auto rect = item->sceneBoundingRect();
+            for (const auto& other : occupied)
+                verify(!rect.adjusted(-1, -1, 1, 1).intersects(other), "Adjacent tree nodes touch or overlap");
+            occupied.append(rect);
+        }
+        verify(findPin(tree, longTitle)->boundingRect().height() > findPin(tree, titles.first())->boundingRect().height(),
+               "Long titles should get extra room for wrapping");
+        const auto before = renderPin(tree, longTitle);
+        auto renamed = branches[1].toObject();
+        const QString variant = longPrefix + "五层";
+        renamed["title"] = variant;
+        branches[1] = renamed;
+        auto comparison = fixture;
+        comparison["rules"] = branches;
+        tree.refresh(comparison);
+        verify(before != renderPin(tree, variant), "Changing the suffix should change the visible long title");
+        tree.refresh(fixture);
+        capture(&tree, "04-long-titles.png");
+        openPin(tree, longTitle);
+    } << [&] {
+        auto* detail = currentDialog("国策详情");
+        const auto labels = detail->findChildren<QLabel*>();
+        verify(std::any_of(labels.cbegin(), labels.cend(), [&](const QLabel* label) {
+            return label->text() == longTitle;
+        }), "The clicked long-title node should open its own full title");
+        button(detail, "关闭")->click();
         std::puts("Desktop UI smoke test passed");
         app.exit(0);
     };
