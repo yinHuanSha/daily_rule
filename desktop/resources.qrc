@@ -1,0 +1,4 @@
+<RCC><qresource prefix="/">
+    <file alias="icon.png">../public/icon-192.png</file>
+    <file alias="expedition.jpg">../public/expedition.jpg</file>
+</qresource></RCC>

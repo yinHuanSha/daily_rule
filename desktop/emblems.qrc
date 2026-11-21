@@ -1,0 +1,8 @@
+<RCC><qresource prefix="/">
+  <file>emblems/standard.png</file>
+  <file>emblems/sun.png</file>
+  <file>emblems/moon.png</file>
+  <file>emblems/book.png</file>
+  <file>emblems/leaf.png</file>
+  <file>emblems/shield.png</file>
+</qresource></RCC>

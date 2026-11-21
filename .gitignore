@@ -8,3 +8,4 @@ playwright-report/
 daily-rule-backup*.json
 daily_rule_backup*.json
 *.local
+/release/

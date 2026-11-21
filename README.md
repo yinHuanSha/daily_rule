@@ -1,6 +1,34 @@
 # 每日国策 · Daily Rule
 
-用一棵可以生长、也可以回撤的国策树，管理自己的日常行动。应用面向手机和桌面浏览器，数据存储在本地。
+用一棵可以生长、也可以回撤的国策树，管理自己的日常行动。Windows 桌面版使用 C++ 和 Qt Widgets，手机和浏览器可使用原有的离线网页 App。两个版本都把档案保存在本机。
+
+## Windows 桌面版
+
+双击 `release/DailyRule/DailyRule.exe` 启动。换电脑时复制整个 `DailyRule` 文件夹，或解压 `release/DailyRule-Windows-x64.zip` 后运行其中的程序。运行桌面版无需安装 Qt 或 Node.js。
+
+桌面版提供国策树、类别管理、示例图、失守剪枝、复盘、历史重试和备份。点图上的国策即可查看详情或记录失守。确认剪枝前可以填写失败原因和改进计划，归档后也可在「历史档案」补写。
+
+### 迁移已有档案
+
+1. 在之前使用每日国策的浏览器、配置文件和网址打开「数据备份」，点「导出备份」。使用本仓库默认本地预览的用户可打开 `http://127.0.0.1:4173/#backup`。
+2. 在桌面版「数据备份」中选择导出的 JSON，核对双方的生效、归档和复盘数量，再确认导入。桌面版支持网页 v1、v2、v3，保留父子关系、建立日期和已用名额。
+3. 桌面版自动保存到 `%LOCALAPPDATA%\DailyRule\archive.json`，升级后继续使用这个位置。再次导入不同的档案时，程序会先在同目录留下带 `.before-import-` 的恢复副本。网页和桌面版独立保存，之后需要同步时可再导出、导入。
+
+### 从源码构建 Windows x64 版本
+
+在 MSYS2 的 UCRT64 环境安装编译工具和 Qt：
+
+```sh
+pacman -S --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-qt6-base mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja
+```
+
+在仓库根目录的 PowerShell 中运行：
+
+```powershell
+.\desktop\build-windows.ps1 -Prefix C:\msys64\ucrt64
+```
+
+脚本使用 CMake 构建，运行原生存储与界面测试，再生成可运行目录和 ZIP。便携包随附 Qt 和所需 DLL 的许可说明。也可单独用 CMake 构建 `desktop/`。
 
 ## 规则
 

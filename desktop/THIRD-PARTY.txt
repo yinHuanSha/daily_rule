@@ -1,0 +1,9 @@
+Daily Rule uses Qt 6 Core, Gui and Widgets as replaceable shared libraries.
+Copyright The Qt Company and other Qt contributors.
+Component license texts and additional notices are in the licenses directory.
+
+Qt upstream source: https://download.qt.io/official_releases/qt/
+The Windows runtime is packaged from MSYS2 UCRT64. Package recipes, source
+URLs and downstream patches are published at:
+https://github.com/msys2/MINGW-packages
+https://packages.msys2.org/package/mingw-w64-ucrt-x86_64-qt6-base
