@@ -102,9 +102,10 @@ enum class PinKind { Root, Category, Rule };
 
 class Pin final : public QGraphicsItem {
 public:
-    Pin(PinKind kind, QString title, QString badge, bool threatened, std::function<void()> clicked)
+    Pin(PinKind kind, QString title, QString badge, bool threatened, std::function<void()> clicked,
+        bool collapsed, const std::function<void()>& details)
         : kind_(kind), icon_(kind == PinKind::Rule ? QPixmap(emblemPath(badge)) : QPixmap()),
-          threatened_(threatened), clicked_(std::move(clicked)) {
+          threatened_(threatened), clicked_(std::move(clicked)), foldable_(bool(details)), collapsed_(collapsed) {
         setAcceptHoverEvents(true);
         setFlag(ItemIsFocusable);
         setCursor(Qt::PointingHandCursor);
@@ -116,12 +117,12 @@ public:
 
         const bool rule = kind == PinKind::Rule;
         const qreal textLeft = rule ? 69 : 32;
-        const qreal textRight = rule ? 16 : 18;
+        const qreal textRight = foldable_ ? 37 : rule ? 16 : 18;
         QFont font = QApplication::font();
         font.setPixelSize(rule ? 15 : 14);
         font.setWeight(rule ? QFont::Medium : QFont::DemiBold);
         // Lay out and paint the same shaped lines, including punctuation and mixed scripts.
-        text_.setText(title.replace('\n', QChar::LineSeparator));
+        text_.setText(QString(title).replace('\n', QChar::LineSeparator));
         text_.setFont(font);
         QTextOption option;
         option.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
@@ -143,6 +144,22 @@ public:
         const qreal height = std::max(rule ? 64.0 : 34.0, textHeight + (rule ? 24 : 12));
         face_ = QRectF(-width / 2, 0, width, height);
         textOrigin_ = QPointF(face_.left() + textLeft, (height - textHeight) / 2);
+        if (foldable_) {
+            auto* button = new QToolButton;
+            button->setText("⋯");
+            button->setAccessibleName(title + "的类别详情");
+            button->setToolTip(title + " · 类别详情");
+            button->setCursor(Qt::PointingHandCursor);
+            button->setFocusPolicy(Qt::StrongFocus);
+            button->setFixedSize(28, 26);
+            button->setStyleSheet("QToolButton {background:transparent; color:#fffbed; border:0; "
+                                  "border-left:1px solid #758b78; font-size:16px; padding:0;}"
+                                  "QToolButton:hover,QToolButton:focus {background:#53745c;}");
+            auto* proxy = new QGraphicsProxyWidget(this);
+            proxy->setWidget(button);
+            proxy->setPos(face_.right() - 31, (height - button->height()) / 2);
+            QObject::connect(button, &QToolButton::clicked, button, details);
+        }
     }
     QRectF boundingRect() const override { return face_.adjusted(-2, -2, 2, 4); }
     const QRectF& face() const { return face_; }
@@ -183,7 +200,14 @@ public:
             p->setPen(Qt::NoPen);
             p->setBrush(QColor("#dbcb99"));
             const qreal x = left + 18;
-            p->drawPolygon(QPolygonF(QVector<QPointF>{{x, middle - 4}, {x + 4, middle}, {x, middle + 4}, {x - 4, middle}}));
+            if (foldable_) {
+                const QPolygonF arrow = collapsed_
+                    ? QPolygonF(QVector<QPointF>{{x-2, middle-5}, {x+3, middle}, {x-2, middle+5}})
+                    : QPolygonF(QVector<QPointF>{{x-5, middle-2}, {x+5, middle-2}, {x, middle+3}});
+                p->drawPolygon(arrow);
+            } else {
+                p->drawPolygon(QPolygonF(QVector<QPointF>{{x, middle-4}, {x+4, middle}, {x, middle+4}, {x-4, middle}}));
+            }
         }
         p->setPen(rule ? QColor("#253f32") : QColor("#fffbed"));
         text_.draw(p, textOrigin_);
@@ -203,6 +227,8 @@ private:
     QPixmap icon_;
     bool threatened_;
     std::function<void()> clicked_;
+    bool foldable_;
+    bool collapsed_;
     QRectF face_;
     QTextLayout text_;
     QPointF textOrigin_;
@@ -273,6 +299,7 @@ public:
         setBackgroundBrush(QColor("#f1eddc"));
         setAccessibleName("国策树沙盘");
     }
+    bool autoFits() const { return automatic_; }
     void fit() {
         const QRectF bounds = sceneRect();
         if (bounds.isEmpty() || viewport()->width() < 10) return;
@@ -392,6 +419,9 @@ const QJsonObject& TreePage::displayed() const { return demo_ ? demoState_ : sta
 void TreePage::refresh(const QJsonObject& state) {
     if (state == state_ && filter_->count() > 0) { updateQuota(); return; }
     state_ = state;
+    QSet<QString> activeCategories;
+    for (const auto& rule : activeRules(state_)) activeCategories.insert(field(rule, "categoryId"));
+    collapsedCategories_.intersect(activeCategories);
     syncFilters();
     updateQuota();
     buildMap();
@@ -412,7 +442,9 @@ void TreePage::apply(const QJsonObject& updated) {
     changed_();
 }
 
-void TreePage::buildMap(bool fit) {
+void TreePage::buildMap(bool fit, const QString& focusCategory) {
+    const auto& collapsed = demo_ ? collapsedDemoCategories_ : collapsedCategories_;
+    QSet<QString> categoriesWithRules;
     const bool all = filter_->currentIndex() <= 0;
     const QString only = filter_->currentData().toString();
     QVector<Branch> nodes{{PinKind::Root, "root", {}, {}, {}}};
@@ -425,6 +457,8 @@ void TreePage::buildMap(bool fit) {
     for (const auto& rule : activeRules(displayed())) {
         const auto category = field(rule, "categoryId");
         if (!all && only != category) continue;
+        categoriesWithRules.insert(category);
+        if (collapsed.contains(category)) continue;
         QString parent = field(rule, "parentId");
         const QString key = !parent.isEmpty() ? "rule/" + parent : category.isEmpty() ? QString("root") : "cat/" + category;
         nodes.append({PinKind::Rule, "rule/" + field(rule, "id"), key, rule, {}});
@@ -454,7 +488,24 @@ void TreePage::buildMap(bool fit) {
                 }
             });
         };
-        node.pin = new Pin(node.kind, title, field(node.data, "badge"), marked, open);
+        const QString id = field(node.data, "id");
+        const bool foldable = node.kind == PinKind::Category && categoriesWithRules.contains(id);
+        std::function<void()> activate = open;
+        std::function<void()> details;
+        if (foldable) {
+            details = open;
+            activate = [this, id, example=demo_] {
+                // Redrawing deletes the clicked item; finish its input event first.
+                QTimer::singleShot(0, this, [this, id, example] {
+                    if (example != demo_) return;
+                    auto& folded = demo_ ? collapsedDemoCategories_ : collapsedCategories_;
+                    if (!folded.remove(id)) folded.insert(id);
+                    buildMap(map_->autoFits(), id);
+                });
+            };
+        }
+        node.pin = new Pin(node.kind, title, field(node.data, "badge"), marked, std::move(activate),
+                           foldable && collapsed.contains(id), details);
         scene_->addItem(node.pin);
     }
 
@@ -509,6 +560,11 @@ void TreePage::buildMap(bool fit) {
     }
     scene_->setSceneRect(scene_->itemsBoundingRect().adjusted(-28, -16, 28, 20));
     if (fit) map_->fit();
+    if (!focusCategory.isEmpty() && indices.contains("cat/" + focusCategory)) {
+        auto* category = nodes[indices.value("cat/" + focusCategory)].pin;
+        category->setFocus(Qt::OtherFocusReason);
+        if (!fit) map_->ensureVisible(category);
+    }
 }
 
 void TreePage::openCategory(QJsonObject category) {
@@ -689,6 +745,7 @@ void TreePage::addRule(const QString& parentId, const QString& categoryId, QJson
                           {"categoryId", link(category->currentData().toString())}, {"retryOf", link(field(retryRecord, "id"))}};
         try {
             const auto next = store_.addRule(input);
+            collapsedCategories_.remove(field(input, "categoryId"));
             if (filter_->currentIndex() > 0 && filter_->currentData().toString() != field(input, "categoryId"))
                 filter_->setCurrentIndex(0);
             dialog.accept();
@@ -764,6 +821,7 @@ void TreePage::moveRule(QJsonObject rule) {
     connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
         try {
             const auto updated = store_.moveBranch(field(rule, "id"), link(category->currentData().toString()));
+            collapsedCategories_.remove(category->currentData().toString());
             dialog.accept();
             apply(updated);
         } catch (const std::exception& err) { failure(&dialog, err); }

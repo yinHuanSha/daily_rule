@@ -83,6 +83,17 @@ export default function App() {
   const [demo, setDemo] = useState(false)
   // undefined shows the whole map. null matches the existing uncategorized branches.
   const [categoryFilter, setCategoryFilter] = useState<string | null | undefined>(undefined)
+  const [collapsed, setCollapsed] = useState(() => ({ personal: new Set<string>(), demo: new Set<string>() }))
+  function setCategoryCollapsed(id: string, closed: boolean, example = demo) {
+    const key = example ? 'demo' : 'personal'
+    setCollapsed(previous => {
+      if (previous[key].has(id) === closed) return previous
+      const next = new Set(previous[key])
+      if (closed) next.add(id)
+      else next.delete(id)
+      return { ...previous, [key]: next }
+    })
+  }
   const [overlay, setOverlay] = useState<Overlay>(null)
   const [menu, setMenu] = useState(false)
   const [message, setMessage] = useState('')
@@ -368,6 +379,8 @@ export default function App() {
                     <TreeMap
                       rules={visibleRules}
                       categories={visibleCategories}
+                      collapsedCategories={demo ? collapsed.demo : collapsed.personal}
+                      onCategoryFold={setCategoryCollapsed}
                       selectedId={selected?.id ?? null}
                       highlightedIds={overlay?.kind === 'prune' ? overlay.rules.map((r) => r.id) : []}
                       onSelect={(id) => setOverlay({ kind: 'detail', id })}
@@ -453,6 +466,7 @@ export default function App() {
             const created = await addRule(input)
             await refresh()
             setDemo(false)
+            if (created.categoryId !== null) setCategoryCollapsed(created.categoryId, false, false)
             if (demo || (filter !== undefined && filter !== created.categoryId)) setCategoryFilter(undefined)
             navigate('tree')
             notify('国策已建立')

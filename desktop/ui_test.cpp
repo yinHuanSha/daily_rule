@@ -32,12 +32,17 @@ QDialog* currentDialog(const QString& title) {
     return widget;
 }
 
-QGraphicsItem* findPin(TreePage& tree, const QString& title) {
+QGraphicsItem* visiblePin(TreePage& tree, const QString& title) {
     auto* view = tree.findChild<QGraphicsView*>();
     for (auto* item : view->scene()->items())
-        if (item->toolTip() == title) return item;
-    verify(false, "Missing map pin " + title);
+        if (item->isVisible() && item->toolTip() == title) return item;
     return nullptr;
+}
+
+QGraphicsItem* findPin(TreePage& tree, const QString& title) {
+    auto* item = visiblePin(tree, title);
+    verify(item != nullptr, "Missing map pin " + title);
+    return item;
 }
 
 void openPin(TreePage& tree, const QString& title) {
@@ -45,6 +50,13 @@ void openPin(TreePage& tree, const QString& title) {
     const auto pos = view->mapFromScene(findPin(tree, title)->sceneBoundingRect().center());
     verify(view->viewport()->rect().contains(pos), "Pin is outside the viewport");
     QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, pos);
+}
+
+int visibleConnectorCount(TreePage& tree) {
+    const auto items = tree.findChild<QGraphicsView*>()->scene()->items();
+    return std::count_if(items.cbegin(), items.cend(), [](QGraphicsItem* item) {
+        return item->isVisible() && item->type() == QGraphicsPathItem::Type;
+    });
 }
 
 QImage renderPin(TreePage& tree, const QString& title) {
@@ -77,6 +89,8 @@ int main(int argc, char** argv) {
     const QString improvement = "打开专注模式再开始工作";
     const QString longPrefix = "离开阅览室前，把借来的书逐本核对，再放回对应书架的第";
     const QString longTitle = longPrefix + "三层";
+    QJsonObject archiveBeforeFolding;
+    int expandedConnectors = 0;
     const QString output = app.arguments().value(1);
     auto capture = [&](QWidget* widget, const QString& basename) {
         if (output.isEmpty()) return;
@@ -196,7 +210,7 @@ int main(int argc, char** argv) {
         tree.refresh(fixture);
         QList<QRectF> occupied;
         for (auto* item : tree.findChild<QGraphicsView*>()->scene()->items()) {
-            if (item->toolTip().isEmpty()) continue;
+            if (item->parentItem() || item->toolTip().isEmpty()) continue;
             const auto rect = item->sceneBoundingRect();
             for (const auto& other : occupied)
                 verify(!rect.adjusted(-1, -1, 1, 1).intersects(other), "Adjacent tree nodes touch or overlap");
@@ -223,6 +237,55 @@ int main(int argc, char** argv) {
             return label->text() == longTitle;
         }), "The clicked long-title node should open its own full title");
         button(detail, "关闭")->click();
+    } << [&] {
+        archiveBeforeFolding = store.load();
+        button(&tree, "示例图")->click();
+        expandedConnectors = visibleConnectorCount(tree);
+        openPin(tree, "生活");
+    } << [&] {
+        verify(!QApplication::activeModalWidget(), "Clicking a populated category should fold its branch");
+        findPin(tree, "生活");
+        verify(!visiblePin(tree, "晨间整备") && !visiblePin(tree, "无屏早餐"), "Folded descendants still visible");
+        findPin(tree, "书桌就绪");
+        findPin(tree, "晨读一页");
+        findPin(tree, "收工留个起点");
+        verify(visibleConnectorCount(tree) == expandedConnectors - 2, "Hidden tasks must also hide their edges");
+        capture(&tree, "05-folded-category.png");
+        button(&tree, "返回我的国策")->click();
+        findPin(tree, longTitle);
+        findPin(tree, "核对归还日期");
+        openPin(tree, "学习国策");
+    } << [&] {
+        auto* empty = currentDialog("学习国策");
+        verify(button(empty, "在此类别新建国策")->isEnabled(), "Empty category needs an add action");
+        button(empty, "关闭")->click();
+    } << [&] {
+        auto* view = tree.findChild<QGraphicsView*>();
+        const auto children = findPin(tree, "生活国策")->childItems();
+        const auto details = std::find_if(children.cbegin(), children.cend(), [](QGraphicsItem* child) {
+            auto* proxy = qgraphicsitem_cast<QGraphicsProxyWidget*>(child);
+            return proxy && qobject_cast<QToolButton*>(proxy->widget());
+        });
+        verify(details != children.cend(), "Missing category details button");
+        const auto pos = view->mapFromScene((*details)->sceneBoundingRect().center());
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, pos);
+    } << [&] {
+        auto* populated = currentDialog("生活国策");
+        verify(populated->findChild<QListWidget*>()->count() == 3, "Category details should list all root policies");
+        verify(button(populated, "在此类别新建国策")->isEnabled(), "Populated category needs an add action");
+        button(populated, "关闭")->click();
+    } << [&] {
+        button(&tree, "示例图")->click();
+        verify(!visiblePin(tree, "无屏早餐"), "Demo fold state lost after visiting the personal tree");
+        openPin(tree, "生活");
+    } << [&] {
+        findPin(tree, "晨间整备");
+        verify(visibleConnectorCount(tree) == expandedConnectors, "Reopening a category must restore its edges");
+        openPin(tree, "无屏早餐");
+    } << [&] {
+        auto* detail = currentDialog("示例国策详情");
+        button(detail, "关闭")->click();
+        verify(store.load() == archiveBeforeFolding, "Viewing folded branches changed the archive");
         std::puts("Desktop UI smoke test passed");
         app.exit(0);
     };

@@ -4,6 +4,7 @@ import {
   type BuiltInEdge, type Node, type NodeProps, type Viewport,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import { ChevronRight, Folder, Ellipsis } from 'lucide-react';
 import { Emblem } from './Emblem';
 import type { Category, Rule } from './model';
 import './tree-map.css';
@@ -11,6 +12,8 @@ import './tree-map.css';
 type TreeMapProps = {
   rules: Rule[];
   categories: Category[];
+  collapsedCategories: ReadonlySet<string>;
+  onCategoryFold: (id: string, closed: boolean) => void;
   selectedId: string | null;
   highlightedIds: string[];
   onSelect: (id: string) => void;
@@ -20,7 +23,10 @@ type TreeMapProps = {
 };
 
 type RulePin = Node<{ rule: Rule; current: boolean; endangered: boolean }, 'rulePin'>;
-type CategoryPin = Node<{ category: Category }, 'categoryPin'>;
+type CategoryPin = Node<{
+  category: Category; hasRules: boolean; collapsed: boolean;
+  onFold: TreeMapProps['onCategoryFold']; onDetails: TreeMapProps['onCategorySelect'];
+}, 'categoryPin'>;
 type RootPin = Node<Record<string, never>, 'rootPin'>;
 type MapPin = RulePin | CategoryPin | RootPin;
 type Branch = { node: MapPin; parentKey: string | null };
@@ -44,14 +50,21 @@ function RuleNode({ data }: NodeProps<RulePin>) {
 }
 
 function CategoryNode({ data }: NodeProps<CategoryPin>) {
-  return <div className="atlas-category" title={data.category.name}>
+  const { category, hasRules, collapsed, onFold, onDetails } = data;
+  const action = hasRules ? (collapsed ? '展开' : '收起') : '查看';
+  return <div className="atlas-category">
     <Handle position={Position.Top} type="target" className="atlas-port" />
-    <svg viewBox="0 0 22 22" fill="none" aria-hidden="true">
-      <path d="M3 4.5h6.2l2.3 2.4H19v10.6H3Z" fill="currentColor" fillOpacity=".14" />
-      <path d="M3 5h6.1l2.3 2.2H19v10.1H3Z" stroke="currentColor" strokeWidth="1.35" strokeLinejoin="round" />
-      <path d="M3.5 9.8h15" stroke="currentColor" strokeWidth="1.1" />
-    </svg>
-    <span>{data.category.name}</span>
+    <button type="button" className="atlas-category__main nodrag nopan"
+      aria-label={'类别：' + category.name} aria-expanded={hasRules ? !collapsed : undefined}
+      title={action + category.name}
+      onClick={() => hasRules ? onFold(category.id, !collapsed) : onDetails(category.id)}>
+      {hasRules ? <ChevronRight className="atlas-category__chevron" aria-hidden="true" /> : <Folder aria-hidden="true" />}
+      <span>{category.name}</span>
+    </button>
+    {hasRules && <button type="button" className="atlas-category__details nodrag nopan"
+      aria-label={category.name + '的类别详情'} title="类别详情" onClick={() => onDetails(category.id)}>
+      <Ellipsis aria-hidden="true" />
+    </button>}
     <Handle position={Position.Bottom} type="source" className="atlas-port" />
   </div>;
 }
@@ -69,23 +82,29 @@ function RootNode() {
 
 const nodeTypes = { rulePin: RuleNode, categoryPin: CategoryNode, rootPin: RootNode };
 
-function branchesFor(categories: Category[], active: Rule[], selectedId: string | null, marked: Set<string>): Branch[] {
+function branchesFor(categories: Category[], active: Rule[], selectedId: string | null, marked: Set<string>,
+                     collapsedCategories: ReadonlySet<string>, onFold: TreeMapProps['onCategoryFold'],
+                     onDetails: TreeMapProps['onCategorySelect']): Branch[] {
   const common = { position: { x: 0, y: 0 }, selectable: true, focusable: true, ariaRole: 'button' as const };
   const branches: Branch[] = [{
     node: { ...common, id: rootKey, type: 'rootPin', width: 44, height: 44, ariaLabel: '空根节点', data: {} },
     parentKey: null,
   }];
+  const occupied = new Set(active.map(rule => rule.categoryId));
   for (const category of categories) {
+    const hasRules = occupied.has(category.id);
     branches.push({
       node: {
         ...common, id: graphKey('category', category.id), type: 'categoryPin',
-        width: category.name.length <= 4 ? 126 : 144, height: 40,
-        data: { category }, ariaLabel: '类别：' + category.name,
+        width: (category.name.length <= 4 ? 126 : 144) + (hasRules ? 30 : 0), height: 40,
+        selectable: false, focusable: false, ariaRole: 'group',
+        data: { category, hasRules, collapsed: collapsedCategories.has(category.id), onFold, onDetails },
       },
       parentKey: rootKey,
     });
   }
   for (const rule of active) {
+    if (rule.categoryId !== null && collapsedCategories.has(rule.categoryId)) continue;
     const endangered = marked.has(rule.id);
     let parentKey = rootKey;
     if (rule.parentId !== null) parentKey = graphKey('rule', rule.parentId);
@@ -210,9 +229,13 @@ const Cartography = memo(function Cartography() {
   </div>;
 });
 
-function MapControls({ overview }: { overview: Viewport }) {
-  const { setViewport, zoomIn, zoomOut } = useReactFlow<MapPin>();
+function MapControls({ initial, overview }: { initial: Viewport; overview: Viewport }) {
+  const { setViewport, zoomIn, zoomOut, viewportInitialized } = useReactFlow<MapPin>();
   const { zoom } = useViewport();
+  const { x, y, zoom: initialZoom } = initial;
+  useLayoutEffect(() => {
+    if (viewportInitialized) void setViewport({ x, y, zoom: initialZoom });
+  }, [viewportInitialized, setViewport, x, y, initialZoom]);
   return <div className="atlas-tools nodrag nopan" role="group" aria-label="地图视图">
     <button type="button" aria-label="缩小地图" title="缩小地图" disabled={zoom <= minZoom} onClick={() => void zoomOut({ duration: 160 })}>
       <svg viewBox="0 0 20 20"><path d="M4 10h12" /></svg>
@@ -251,7 +274,7 @@ function cameraFor(nodes: MapPin[], width: number, height: number) {
   };
 }
 
-export default function TreeMap({ rules, categories, selectedId, highlightedIds, onSelect, onCategorySelect, onManageCategories, demo = false }: TreeMapProps) {
+export default function TreeMap({ rules, categories, collapsedCategories, onCategoryFold, selectedId, highlightedIds, onSelect, onCategorySelect, onManageCategories, demo = false }: TreeMapProps) {
   const surface = useRef<HTMLElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
   useLayoutEffect(() => {
@@ -265,9 +288,10 @@ export default function TreeMap({ rules, categories, selectedId, highlightedIds,
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
-  const { nodes, edges, topology, byKey } = useMemo(() => {
+  const { nodes, edges, byKey } = useMemo(() => {
     const marked = new Set(highlightedIds);
-    const branches = branchesFor(categories, rules.filter(rule => !rule.archivedAt), selectedId, marked);
+    const branches = branchesFor(categories, rules.filter(rule => !rule.archivedAt), selectedId, marked,
+                                 collapsedCategories, onCategoryFold, onCategorySelect);
     arrange(branches);
     const edges: BuiltInEdge[] = [];
     for (const { node, parentKey } of branches) {
@@ -277,19 +301,17 @@ export default function TreeMap({ rules, categories, selectedId, highlightedIds,
       edges.push(link(node.id, parentKey, highlight));
     }
     const nodes = branches.map(branch => branch.node);
-    return { nodes, edges, topology: JSON.stringify(branches.map(({ node, parentKey }) => [node.id, parentKey])),
-      byKey: new Map(nodes.map(node => [node.id, node])) };
-  }, [categories, rules, selectedId, highlightedIds]);
+    return { nodes, edges, byKey: new Map(nodes.map(node => [node.id, node])) };
+  }, [categories, rules, selectedId, highlightedIds, collapsedCategories, onCategoryFold, onCategorySelect]);
   function activate(node: MapPin) {
     if (node.type === 'rulePin') onSelect(node.data.rule.id);
-    else if (node.type === 'categoryPin') onCategorySelect(node.data.category.id);
-    else onManageCategories();
+    else if (node.type === 'rootPin') onManageCategories();
   }
   const camera = cameraFor(nodes, size.width, size.height);
   return <section ref={surface} className="atlas-map" aria-label={demo ? '演习国策树地图' : '我的国策树地图'}>
     <Cartography />
     {size.width > 0 && size.height > 0 &&
-      <ReactFlowProvider key={size.width + '/' + size.height + '/' + topology}>
+      <ReactFlowProvider>
         <ReactFlow<MapPin, BuiltInEdge> nodes={nodes} edges={edges} nodeTypes={nodeTypes} defaultViewport={camera.initial}
           minZoom={minZoom} maxZoom={2}
           nodesDraggable={false} nodesConnectable={false} edgesReconnectable={false}
@@ -299,11 +321,12 @@ export default function TreeMap({ rules, categories, selectedId, highlightedIds,
           onKeyDown={event => {
             if (event.key !== 'Enter' && event.key !== ' ') return;
             const target = event.target as HTMLElement;
+            if (target.closest('button')) return;
             const id = target.closest<HTMLElement>('.react-flow__node')?.dataset.id;
             const node = id && byKey.get(id);
             if (node) { event.preventDefault(); activate(node); }
           }}>
-          <MapControls overview={camera.overview} />
+          <MapControls initial={camera.initial} overview={camera.overview} />
         </ReactFlow>
       </ReactFlowProvider>}
   </section>;

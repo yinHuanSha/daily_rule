@@ -20,7 +20,7 @@ public:
     void retry(const QJsonObject& rule);
 
 private:
-    void buildMap(bool fit = true);
+    void buildMap(bool fit = true, const QString& focusCategory = {});
     void syncFilters();
     void updateQuota();
     void openRule(QJsonObject rule);
@@ -39,6 +39,8 @@ private:
     QJsonObject demoState_;
     bool demo_ = false;
     QSet<QString> threatened_;
+    QSet<QString> collapsedCategories_;
+    QSet<QString> collapsedDemoCategories_;
     MapView* map_;
     QGraphicsScene* scene_;
     QComboBox* filter_;
