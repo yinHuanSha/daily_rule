@@ -1,3 +1,4 @@
+import { androidBackup, saveAndroidBackup } from './androidBackup'
 import { useRef, useState } from 'react'
 import {
   Archive,
@@ -13,6 +14,7 @@ import {
   Sprout,
 } from 'lucide-react'
 import { Emblem } from './Emblem'
+import { CloudSync } from './CloudSync'
 import { Dialog } from './RuleDialogs'
 import { localDay, parseBackup } from './model'
 import type { Category, Rule, TreeState } from './model'
@@ -163,10 +165,20 @@ export function Backups({
   async function exportFile() {
     try {
       const tree = await loadTree()
-      const url = URL.createObjectURL(new Blob([JSON.stringify(tree, null, 2)], { type: 'application/json' }))
+      const filename = `daily-rule-backup-v${tree.version}-${localDay()}.json`
+      const json = JSON.stringify(tree, null, 2)
+      if (androidBackup()) {
+        setBusy(true)
+        try {
+          if (await saveAndroidBackup(filename, json)) notify('已保存 JSON 备份')
+          setError('')
+        } finally { setBusy(false) }
+        return
+      }
+      const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }))
       const anchor = document.createElement('a')
       anchor.href = url
-      anchor.download = `daily-rule-backup-v${tree.version}-${localDay()}.json`
+      anchor.download = filename
       document.body.append(anchor)
       anchor.click()
       anchor.remove()
@@ -189,6 +201,7 @@ export function Backups({
           </p>
         </div>
       </div>
+      <CloudSync afterImport={afterImport} />
       <div className="backup-grid">
         <section className="action-card">
           <div className="action-icon">
@@ -196,7 +209,7 @@ export function Backups({
           </div>
           <h2>导出备份</h2>
           <p>把国策类别、整棵树、撤回历史、失守复盘和每日名额记录保存为 JSON 文件。</p>
-          <button className="button primary" onClick={exportFile}>
+          <button className="button primary" disabled={busy} onClick={exportFile}>
             <ArrowDownToLine size={16} />
             导出备份
           </button>

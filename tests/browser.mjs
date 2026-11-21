@@ -167,6 +167,80 @@ async function moveBranch(page, ruleTitle, categoryName) {
   await button(detail, '关闭').click()
 }
 
+// The WebView bridge and the GitHub service are isolated fixtures; no credentials or user archives leave this test.
+async function checkAndroidSync(browser, archive) {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, serviceWorkers: 'block' })
+  try {
+    await context.addInitScript(() => {
+      let saved = ''
+      window.DailyRuleAndroid = { getSecret: () => saved, setSecret: value => { saved = value; return true } }
+    })
+    let cloud = archive
+    let sha = 'a'.repeat(40)
+    let uploads = 0
+    await context.route('https://api.github.com/**', async route => {
+      const path = new URL(route.request().url()).pathname
+      if (path === '/repos/test/sync') return route.fulfill({ json: { private: true, full_name: 'test/sync', default_branch: 'main' } })
+      assert.equal(path, '/repos/test/sync/contents/archive.json')
+      if (route.request().method() === 'PUT') {
+        const body = route.request().postDataJSON()
+        assert.equal(body.sha, sha)
+        cloud = JSON.parse(Buffer.from(body.content, 'base64').toString('utf8'))
+        sha = 'b'.repeat(40)
+        uploads++
+        return route.fulfill({ json: { content: { sha } } })
+      }
+      return route.fulfill({ json: { type: 'file', sha, encoding: 'base64', content: Buffer.from(JSON.stringify(cloud)).toString('base64') } })
+    })
+    const page = await openPage(context)
+    await navigate(page, '数据备份')
+    await button(page, '设置同步').tap()
+    await page.getByLabel('GitHub 私有仓库').fill('test/sync')
+    await page.getByLabel('访问令牌').fill('fake-ui-test-credential')
+    await button(page, '保存设置').tap()
+    await button(page, '立即同步').tap()
+    const direction = page.getByRole('dialog', { name: '选择同步方向' })
+    await direction.getByText('云端', { exact: true }).waitFor()
+    await button(direction, '用云端档案替换手机').tap()
+    await page.getByText('已将云端档案同步到手机。').waitFor()
+    await button(page, '立即同步').tap()
+    await page.getByText('手机与云端档案一致。').waitFor()
+    assert.equal(uploads, 0)
+    const local = { ...archive, categories: [...archive.categories, { id: 'extra', name: '手机新增类别' }] }
+    await importBackup(page, local)
+    await button(page, '立即同步').tap()
+    await page.getByText('手机档案已同步到云端。').waitFor()
+    assert.deepEqual(cloud, local)
+    assert.equal(uploads, 1)
+    // Identical counts and titles must still expose the concrete values on both sides.
+    const mobileEdit = structuredClone(local)
+    mobileEdit.rules.find(r => r.review).review.reason = '手机记录的失败原因'
+    mobileEdit.rules[0].action = '先在手机上核对清单'
+    await importBackup(page, mobileEdit)
+    cloud = structuredClone(local)
+    cloud.rules.find(r => r.review).review.reason = '桌面记录的失败原因'
+    cloud.rules[0].action = '先在桌面上核对清单'
+    sha = 'c'.repeat(40)
+    await button(page, '立即同步').tap()
+    await direction.getByText(/查看两端差异/).tap()
+    for (const text of ['手机记录的失败原因', '桌面记录的失败原因', '先在手机上核对清单', '先在桌面上核对清单'])
+      await direction.getByText(text, { exact: true }).waitFor()
+    await button(direction, '取消').tap()
+    assert.equal(uploads, 1)
+    await button(page, '同步恢复副本').tap()
+    await button(page, '确认恢复到手机').tap()
+    await page.getByText('已在手机恢复副本，下次同步时会重新核对档案。').waitFor()
+    await button(page, '立即同步').tap()
+    await direction.waitFor()
+    await button(direction, '取消').tap()
+    assert.equal(uploads, 1)
+    assert.ok(await page.evaluate(() => !JSON.stringify(localStorage).includes('fake-ui-test-credential')))
+  } finally {
+    await context.close()
+  }
+  console.log('通过 · 手机同步设置、跨端拉取/推送、恢复副本和冲突取消（模拟远端）')
+}
+
 async function checkCategoryWorkflow(browser) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 960 }, timezoneId: 'Asia/Shanghai' })
   context.setDefaultTimeout(10000)
@@ -426,6 +500,7 @@ try {
   assert.ok(await button(phone.locator('.hero'), '今日名额已用完').isDisabled())
   console.log('通过 · 跨浏览器备份往返和移动窄屏新增、查看、剪枝')
   await checkCategoryWorkflow(desktopBrowser)
+  await checkAndroidSync(mobileBrowser, retried)
 } finally {
   await Promise.all(browsers.map(browser => browser.close()))
   if (server) await server.close()

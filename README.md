@@ -1,6 +1,25 @@
 # 每日国策 · Daily Rule
 
-用一棵可以生长、也可以回撤的国策树，管理自己的日常行动。Windows 桌面版使用 C++ 和 Qt Widgets，手机和浏览器可使用原有的离线网页 App。两个版本都把档案保存在本机。
+用一棵可以生长、也可以回撤的国策树，管理自己的日常行动。Windows 桌面版使用 C++ 和 Qt Widgets。安卓安装包内置可离线使用的国策树界面，两端可通过专用 GitHub 私有仓库同步。浏览器也可继续使用离线网页 App。
+
+## 安卓安装与跨网络同步
+
+在手机上下载 APK 后安装。支持 Android 8.0 及以上，建议使用已更新的 Android System WebView。国策树、剪枝、复盘、重试和备份都可离线使用。[下载 Android 1.0 APK](https://github.com/yinHuanSha/daily_rule/releases/download/android-v1.0.0/DailyRule-Android.apk)
+
+1. 准备一个专门存放个人档案的 GitHub **私有**仓库。每台设备使用细粒度访问令牌，Repository access 选 Only select repositories，选中自己的同步仓库，Contents 选 Read and write。[创建细粒度令牌](https://github.com/settings/personal-access-tokens/new?name=Daily%20Rule%20Sync&contents=write)
+2. 安卓打开「数据备份 → 跨设备同步」，Windows 打开左侧「跨设备同步」。填入同一个「账号/仓库名」和该设备的令牌，保存设置。凭据保存在设备，安卓使用 Android Keystore，Windows 使用当前用户的 DPAPI。
+3. 点「立即同步」。第一次连接时，已有电脑档案的用户应先从电脑上传，手机选择「用云端档案替换手机」。后续只有一端修改时按修改方向同步。两端都修改时会显示本机和云端档案，请核对后选择要保留的一整份；如需同时保留两端的修改，先导出 JSON。
+4. 手机在联网后手动点「立即同步」。Windows 还可以开启程序运行期间的自动检查。GitHub 保存 `archive.json` 的提交历史，客户端下载前保留本地恢复副本。网页 PWA 可以用 JSON 和这两个客户端互相迁移。
+
+### 从源码构建 APK
+
+在 Windows 安装 JDK 17+、Android SDK Platform 35 和 Build Tools 35.0.0。仓库根目录执行 `npm ci`，再运行以下脚本。脚本会构建网页资源、嵌入 APK、签名并验证，输出 `release/DailyRule-Android.apk`。
+
+```powershell
+.\android\build-windows.ps1 -SdkRoot $env:ANDROID_HOME -Jdk $env:JAVA_HOME
+```
+
+同一应用 ID 的覆盖更新需要沿用同一签名密钥。自建版本应妥善保管首次打包生成的发布密钥和密码；官方发布包可直接覆盖更新原官方版本。
 
 ## Windows 桌面版
 
@@ -12,7 +31,7 @@
 
 1. 在之前使用每日国策的浏览器、配置文件和网址打开「数据备份」，点「导出备份」。使用本仓库默认本地预览的用户可打开 `http://127.0.0.1:4173/#backup`。
 2. 在桌面版「数据备份」中选择导出的 JSON，核对双方的生效、归档和复盘数量，再确认导入。桌面版支持网页 v1、v2、v3，保留父子关系、建立日期和已用名额。
-3. 桌面版自动保存到 `%LOCALAPPDATA%\DailyRule\archive.json`，升级后继续使用这个位置。再次导入不同的档案时，程序会先在同目录留下带 `.before-import-` 的恢复副本。网页和桌面版独立保存，之后需要同步时可再导出、导入。
+3. 桌面版自动保存到 `%LOCALAPPDATA%\DailyRule\archive.json`，升级后继续使用这个位置。再次导入不同的档案时，程序会先在同目录留下带 `.before-import-` 的恢复副本。网页与桌面版可继续通过 JSON 迁移，安卓与桌面版还可使用跨设备同步。
 
 ### 从源码构建 Windows x64 版本
 

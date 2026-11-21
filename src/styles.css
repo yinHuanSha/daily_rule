@@ -1352,3 +1352,19 @@ main {
 .history-review { margin-top: 10px; }
 .history-review span { white-space: pre-wrap; }
 .history-review button { margin-top: 6px; }
+
+.cloud-sync { margin: 16px 0; }
+.cloud-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.cloud-actions .button { margin-top: 8px; }
+.cloud-summary { margin: 12px 0; padding: 10px 12px; background: #f3f2e8; border-radius: 6px; }
+.cloud-summary ul { max-height: 12em; overflow-y: auto; padding-left: 18px; }
+.cloud-summary summary { cursor: pointer; }
+
+.cloud-differences { margin: 12px 0; overflow-wrap: anywhere; }
+.cloud-differences summary { cursor: pointer; font-weight: 650; }
+.cloud-differences ul { list-style: none; padding: 0; margin: 8px 0; max-height: 40dvh; overflow-y: auto; }
+.cloud-differences li { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.cloud-field { font-size: 13px; margin-top: 6px; }
+.cloud-field dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 8px; margin: 4px 0; }
+.cloud-field dt { color: var(--muted); }
+.cloud-field dd { margin: 0; white-space: pre-wrap; }

@@ -43,6 +43,7 @@ function openDatabase(): Promise<IDBDatabase> {
 interface Operation<T> {
   result: T
   next?: TreeState
+  saveBeforeSync?: boolean
 }
 
 // A read/write transaction serializes the quota check and its update across connections.
@@ -61,6 +62,9 @@ async function transact<T>(mode: IDBTransactionMode, operation: (state: TreeStat
         try {
           const update = operation(request.result ?? emptyState())
           result = update.result
+          if (update.saveBeforeSync) store.put({
+            state: request.result ?? emptyState(), at: new Date().toISOString(),
+          }, 'last-sync-recovery')
           if (update.next) store.put(update.next, treeKey)
         } catch (error) {
           failure = error
@@ -180,4 +184,28 @@ export async function replaceTree(state: TreeState, expected?: TreeState): Promi
     if (expected && JSON.stringify(current) !== JSON.stringify(expected)) throw new BackupConflict(current)
     return next
   })
+}
+
+export interface SyncRecovery { state: TreeState; at: string }
+
+export async function loadSyncRecovery(): Promise<SyncRecovery | undefined> {
+  const db = await openDatabase()
+  try {
+    return await new Promise<SyncRecovery | undefined>((resolve, reject) => {
+      const request = db.transaction(storeName).objectStore(storeName).get('last-sync-recovery')
+      request.onsuccess = () => resolve(request.result)
+      request.onerror = () => reject(request.error)
+    })
+  } finally {
+    db.close()
+  }
+}
+
+export async function replaceFromSync(incoming: TreeState, expected: TreeState): Promise<void> {
+  const next = decodeTree(incoming)
+  await transact('readwrite', current => {
+    if (JSON.stringify(current) !== JSON.stringify(expected)) throw new BackupConflict(current)
+    return { result: undefined, next, saveBeforeSync: true }
+  })
+  changed()
 }

@@ -1,4 +1,5 @@
 #include "pages.h"
+#include "cloudpage.h"
 #include "store.h"
 #include "treepage.h"
 
@@ -20,7 +21,7 @@
 #include <exception>
 
 namespace {
-enum Page { Tree, History, Backup, Guide };
+enum Page { Tree, History, Backup, Sync, Guide };
 
 class Window final : public QMainWindow {
 public:
@@ -47,7 +48,7 @@ public:
         name->setObjectName("brand");
         nav->addWidget(name);
         nav->addSpacing(25);
-        const QStringList titles{"国策树", "历史档案", "数据备份", "国策手册"};
+        const QStringList titles{"国策树", "历史档案", "数据备份", "跨设备同步", "国策手册"};
         for (int i = 0; i < titles.size(); ++i) {
             auto *button = new QPushButton(titles[i]);
             button->setCheckable(true);
@@ -65,6 +66,8 @@ public:
             Pages::categories(this, state, store, [this] { reload(); });
         });
         stack->addWidget(tree);
+        cloud = new CloudPage(store, [this] { reload(); });
+        stack->addWidget(cloud);
         navigate(Tree);
         // A second window can change the archive. Refresh after modal edits have ended.
         auto *timer = new QTimer(this);
@@ -95,16 +98,18 @@ private:
                 });
             } else if (next == Backup) {
                 target = Pages::backups(store, [this] { reload(); });
+            } else if (next == Sync) {
+                target = cloud;
             } else if (next == Guide) {
                 target = Pages::guide();
             }
-            if (target != tree) stack->addWidget(target);
+            if (target != tree && target != cloud) stack->addWidget(target);
             stack->setCurrentWidget(target);
             if (secondary) {
                 stack->removeWidget(secondary);
                 secondary->deleteLater();
             }
-            secondary = (target == tree ? nullptr : target);
+            secondary = (target == tree || target == cloud ? nullptr : target);
             links.button(next)->setChecked(true);
             page = next;
         } catch (const std::exception &error) {
@@ -122,6 +127,7 @@ private:
     Page page = Tree;
     QButtonGroup links;
     TreePage *tree = nullptr;
+    CloudPage *cloud = nullptr;
     QStackedWidget *stack = nullptr;
     QWidget *secondary = nullptr;
 };

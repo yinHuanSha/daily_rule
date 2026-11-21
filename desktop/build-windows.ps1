@@ -20,7 +20,7 @@ New-Item -ItemType Directory -Path $bundle | Out-Null
 Copy-Item -LiteralPath "$build/DailyRule.exe" -Destination $bundle
 $qtPlugins = (& "$bin/qtpaths6.exe" --query QT_INSTALL_PLUGINS).Trim()
 if ($LASTEXITCODE -or -not (Test-Path -LiteralPath $qtPlugins)) { throw 'Qt plugins were not found.' }
-foreach ($plugin in 'platforms/qwindows.dll','imageformats/qjpeg.dll') {
+foreach ($plugin in 'platforms/qwindows.dll','imageformats/qjpeg.dll','tls/qschannelbackend.dll') {
     $destination = Join-Path $bundle $plugin
     New-Item -ItemType Directory -Force -Path (Split-Path $destination) | Out-Null
     Copy-Item -LiteralPath (Join-Path $qtPlugins $plugin) -Destination $destination
